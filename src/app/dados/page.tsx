@@ -9,7 +9,8 @@ interface Stats {
   titulosAbertos: number;
   titulosConcluidos: number;
   interacoes: number;
-  valorEmRisco: number;
+  valorVencido: number;
+  valorAberto: number;
 }
 
 function formatarMoeda(v: number) {
@@ -25,7 +26,7 @@ export default function DadosPage() {
 
   const carregarStats = useCallback(async () => {
     setLoadingStats(true);
-    const res = await fetch('/api/dados');
+    const res = await fetch('/api/dados', { cache: 'no-store' });
     const data = await res.json();
     setStats(data);
     setLoadingStats(false);
@@ -42,7 +43,7 @@ export default function DadosPage() {
     setMensagem(data.mensagem ?? 'Dados removidos.');
     setConfirmacao(null);
     setDeletando(false);
-    carregarStats();
+    await carregarStats();
   }
 
   return (
@@ -73,8 +74,19 @@ export default function DadosPage() {
             <StatCard label="Títulos abertos" value={stats.titulosAbertos} highlight="blue" />
             <StatCard label="Títulos concluídos" value={stats.titulosConcluidos} />
             <StatCard label="Total de títulos" value={stats.titulos} />
-            <StatCard label="Interações" value={stats.interacoes} />
-            <StatCard label="Valor em risco" value={formatarMoeda(stats.valorEmRisco)} highlight="red" />
+            {/* Valor vencido = mesma lógica da lista do dia (diasAtraso > 0) */}
+            <StatCard
+              label="Valor vencido"
+              value={formatarMoeda(stats.valorVencido)}
+              highlight="red"
+              hint="Apenas títulos já vencidos — igual à lista do dia"
+            />
+            {/* Valor aberto = todos em aberto, incluindo os que ainda vão vencer */}
+            <StatCard
+              label="Total em aberto"
+              value={formatarMoeda(stats.valorAberto)}
+              hint="Inclui vencidos + títulos que ainda vão vencer"
+            />
           </>
         ) : (
           <p className="text-sm text-slate-400 col-span-3">Erro ao carregar dados.</p>
@@ -129,10 +141,12 @@ function StatCard({
   label,
   value,
   highlight,
+  hint,
 }: {
   label: string;
   value: string | number;
   highlight?: 'blue' | 'red';
+  hint?: string;
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
@@ -148,6 +162,7 @@ function StatCard({
       >
         {value}
       </p>
+      {hint && <p className="text-xs text-slate-400 mt-1 leading-tight">{hint}</p>}
     </div>
   );
 }

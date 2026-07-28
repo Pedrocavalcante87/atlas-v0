@@ -13,12 +13,18 @@ export async function GET() {
     supabase.from('clientes').select('*', { count: 'exact', head: true }),
     supabase.from('titulos').select('*', { count: 'exact', head: true }),
     supabase.from('interacoes').select('*', { count: 'exact', head: true }),
-    supabase.from('titulos').select('valor').eq('status', 'aberto'),
+    supabase.from('titulos').select('valor, data_vencimento').eq('status', 'aberto'),
     supabase.from('titulos').select('*', { count: 'exact', head: true }).eq('status', 'aberto'),
     supabase.from('titulos').select('*', { count: 'exact', head: true }).neq('status', 'aberto'),
   ]);
 
-  const valorEmRisco = (abertos ?? []).reduce((sum, t) => sum + (t.valor as number), 0);
+  // Mesma lógica da página principal: só títulos já vencidos contam como "em risco"
+  const hoje = new Date().toISOString().split('T')[0];
+  const lista = abertos ?? [];
+  const valorVencido  = lista
+    .filter((t) => (t.data_vencimento as string) < hoje)
+    .reduce((sum, t) => sum + (t.valor as number), 0);
+  const valorAberto = lista.reduce((sum, t) => sum + (t.valor as number), 0);
 
   return NextResponse.json({
     clientes: totalClientes ?? 0,
@@ -26,7 +32,8 @@ export async function GET() {
     titulosAbertos: totalAbertos ?? 0,
     titulosConcluidos: totalConcluidos ?? 0,
     interacoes: totalInteracoes ?? 0,
-    valorEmRisco,
+    valorVencido,
+    valorAberto,
   });
 }
 
