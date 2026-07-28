@@ -200,11 +200,24 @@ export async function POST(request: NextRequest) {
   let count = 0;
   let duplicatas = 0;
 
+  // Breakdown financeiro calculado durante o processamento
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const breakdown = {
+    vencidos:    { count: 0, valor: 0 },   // diasAtraso > 0 — cobrar hoje
+    preventivos: { count: 0, valor: 0 },   // 0 a -3 dias — enviar lembrete
+    futuros:     { count: 0, valor: 0 },   // > 3 dias no futuro — monitorar
+  };
+  const linhasIgnoradas: { linha: number; nome: string; motivo: string }[] = [];
+
   for (const [i, row] of rows.entries()) {
     const linha = i + 2;
+    const nomeRaw = row[mapping.nome!]?.trim();
 
-    const nome = row[mapping.nome!]?.trim();
-    if (!nome) {
+    const nome = nomeRaw || `Linha ${linha}`;
+
+    if (!nomeRaw) {
+      linhasIgnoradas.push({ linha, nome, motivo: 'Nome em branco' });
       importErrors.push(`Linha ${linha}: nome em branco.`);
       continue;
     }
@@ -212,6 +225,7 @@ export async function POST(request: NextRequest) {
     const telefoneRaw = row[mapping.telefone!]?.trim() ?? '';
     const rawDigits = telefoneRaw.replace(/\D/g, '');
     if (!rawDigits || rawDigits.length < 8) {
+      linhasIgnoradas.push({ linha, nome, motivo: `Telefone inválido — "${telefoneRaw}"` });
       importErrors.push(`Linha ${linha}: telefone inválido — "${telefoneRaw}".`);
       continue;
     }
@@ -220,6 +234,7 @@ export async function POST(request: NextRequest) {
     const valorRaw = row[mapping.valor!]?.trim() ?? '';
     const valor = normalizarValor(valorRaw);
     if (isNaN(valor) || valor <= 0) {
+      linhasIgnoradas.push({ linha, nome, motivo: `Valor inválido — "${valorRaw}"` });
       importErrors.push(`Linha ${linha}: valor inválido — "${valorRaw}".`);
       continue;
     }
@@ -227,6 +242,7 @@ export async function POST(request: NextRequest) {
     const dataRaw = row[mapping.data_vencimento!]?.trim() ?? '';
     const dataVencimento = normalizarData(dataRaw);
     if (!dataVencimento) {
+      linhasIgnoradas.push({ linha, nome, motivo: `Data inválida — "${dataRaw}"` });
       importErrors.push(
         `Linha ${linha}: data inválida — "${dataRaw}". ` +
         `Aceitos: DD/MM/AAAA, AAAA-MM-DD, DD-MM-AAAA, DD.MM.AAAA, AAAA/MM/DD, AAAAMMDD`,
@@ -241,6 +257,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (errCliente || !cliente) {
+      linhasIgnoradas.push({ linha, nome, motivo: `Erro interno ao salvar cliente` });
       importErrors.push(`Linha ${linha}: erro ao salvar cliente — ${errCliente?.message}`);
       continue;
     }
@@ -268,8 +285,24 @@ export async function POST(request: NextRequest) {
     });
 
     if (errTitulo) {
+      linhasIgnoradas.push({ linha, nome, motivo: `Erro interno ao salvar título` });
       importErrors.push(`Linha ${linha}: erro ao salvar título — ${errTitulo.message}`);
       continue;
+    }
+
+    // Classifica no breakdown
+    const venc = new Date(`${dataVencimento}T12:00:00`);
+    venc.setHours(0, 0, 0, 0);
+    const dias = Math.round((hoje.getTime() - venc.getTime()) / (1000 * 60 * 60 * 24));
+    if (dias > 0) {
+      breakdown.vencidos.count++;
+      breakdown.vencidos.valor += valor;
+    } else if (dias >= -3) {
+      breakdown.preventivos.count++;
+      breakdown.preventivos.valor += valor;
+    } else {
+      breakdown.futuros.count++;
+      breakdown.futuros.valor += valor;
     }
 
     count++;
@@ -288,13 +321,19 @@ export async function POST(request: NextRequest) {
     : meta.delimiter === '|' ? 'pipe (|)'
     : 'vírgula (,)';
 
+  const totalValor = breakdown.vencidos.valor + breakdown.preventivos.valor + breakdown.futuros.valor;
+
   return NextResponse.json({
     success: true,
+    totalLinhas: rows.length,
     count,
     duplicatas,
     errors: importErrors,
+    linhasIgnoradas,
     colunasDetectadas,
     separadorDetectado: delimiterLabel,
+    breakdown,
+    totalValor,
     message:
       `${count} título(s) importado(s)` +
       (duplicatas > 0 ? ` · ${duplicatas} duplicata(s) ignorada(s)` : '') +
