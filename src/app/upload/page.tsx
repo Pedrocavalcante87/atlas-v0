@@ -8,6 +8,8 @@ interface UploadResult {
   message: string;
   count: number;
   errors: string[];
+  colunasDetectadas?: Record<string, string>;
+  separadorDetectado?: string;
 }
 
 export default function UploadPage() {
@@ -113,23 +115,48 @@ export default function UploadPage() {
 
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex gap-2.5 text-sm text-red-700">
-                <span>⚠️</span>
-                <span>{error}</span>
+                <span className="shrink-0">⚠️</span>
+                <span className="whitespace-pre-wrap">{error}</span>
               </div>
             )}
 
             {result && (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-2">
                   <span>✅</span>
                   <p className="text-sm text-emerald-800 font-semibold">{result.message}</p>
                 </div>
+
+                {/* Relatório de detecção */}
+                {result.colunasDetectadas && (
+                  <div className="mt-2 pt-2 border-t border-emerald-200">
+                    <p className="text-xs font-semibold text-emerald-700 mb-1.5">
+                      Colunas detectadas
+                      {result.separadorDetectado && (
+                        <span className="font-normal text-emerald-600"> · separador: {result.separadorDetectado}</span>
+                      )}
+                    </p>
+                    <div className="space-y-0.5">
+                      {Object.entries(result.colunasDetectadas).map(([canonical, mapped]) => (
+                        <p key={canonical} className="text-xs text-emerald-700 font-mono">
+                          {mapped}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {result.errors.length > 0 && (
-                  <ul className="mt-2 space-y-1 pl-6">
-                    {result.errors.map((err, i) => (
-                      <li key={i} className="text-xs text-red-600">• {err}</li>
-                    ))}
-                  </ul>
+                  <div className="mt-2 pt-2 border-t border-emerald-200">
+                    <p className="text-xs font-semibold text-amber-700 mb-1">
+                      {result.errors.length} linha(s) com aviso:
+                    </p>
+                    <ul className="space-y-0.5">
+                      {result.errors.map((err, i) => (
+                        <li key={i} className="text-xs text-red-600">• {err}</li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             )}
