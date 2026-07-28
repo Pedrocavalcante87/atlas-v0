@@ -7,18 +7,44 @@ import Link from 'next/link';
 interface UploadResult {
   message: string;
   count: number;
+  duplicatas?: number;
   errors: string[];
   colunasDetectadas?: Record<string, string>;
   separadorDetectado?: string;
 }
 
+interface FilePreview {
+  linhas: number;
+  separador: string;
+}
+
+function analisarCSVLocal(text: string): FilePreview {
+  const primeiraLinha = text.split('\n')[0] ?? '';
+  const separador = primeiraLinha.includes(';')
+    ? 'ponto e vírgula (;)'
+    : primeiraLinha.includes('\t')
+    ? 'tab'
+    : 'vírgula (,)';
+  const linhas = Math.max(0, text.trim().split('\n').filter((l) => l.trim()).length - 1);
+  return { linhas, separador };
+}
+
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<FilePreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+
+  async function handleFileSelect(selectedFile: File) {
+    setFile(selectedFile);
+    setResult(null);
+    setError('');
+    const text = await selectedFile.text();
+    setPreview(analisarCSVLocal(text));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -66,9 +92,8 @@ export default function UploadPage() {
                 accept=".csv,text/csv"
                 className="hidden"
                 onChange={(e) => {
-                  setFile(e.target.files?.[0] ?? null);
-                  setResult(null);
-                  setError('');
+                  const f = e.target.files?.[0];
+                  if (f) handleFileSelect(f);
                 }}
               />
               <div
@@ -93,6 +118,7 @@ export default function UploadPage() {
                       onClick={(e) => {
                         e.preventDefault();
                         setFile(null);
+                        setPreview(null);
                         if (inputRef.current) inputRef.current.value = '';
                       }}
                     >
@@ -113,6 +139,21 @@ export default function UploadPage() {
               </div>
             </label>
 
+            {/* Preview local — aparece assim que o arquivo é selecionado */}
+            {preview && !result && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex items-start gap-2.5 text-sm">
+                <span className="shrink-0 mt-0.5">🔍</span>
+                <div>
+                  <p className="text-blue-800 font-semibold">
+                    {preview.linhas} linha{preview.linhas !== 1 ? 's' : ''} detectada{preview.linhas !== 1 ? 's' : ''}
+                  </p>
+                  <p className="text-blue-600 text-xs mt-0.5">
+                    Separador: {preview.separador} · Clique em &quot;Importar&quot; para enviar ao sistema
+                  </p>
+                </div>
+              </div>
+            )}
+
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex gap-2.5 text-sm text-red-700">
                 <span className="shrink-0">⚠️</span>
@@ -127,21 +168,31 @@ export default function UploadPage() {
                   <p className="text-sm text-emerald-800 font-semibold">{result.message}</p>
                 </div>
 
+                {/* Duplicatas ignoradas */}
+                {(result.duplicatas ?? 0) > 0 && (
+                  <div className="mt-2 pt-2 border-t border-emerald-200 flex items-center gap-2">
+                    <span className="text-amber-500">⚠️</span>
+                    <p className="text-xs text-amber-700">
+                       {result.duplicatas} título(s) ignorado(s) por já existirem no sistema com o mesmo valor e vencimento.
+                    </p>
+                  </div>
+                )}
+
                 {/* Relatório de detecção */}
                 {result.colunasDetectadas && (
                   <div className="mt-2 pt-2 border-t border-emerald-200">
                     <p className="text-xs font-semibold text-emerald-700 mb-1.5">
-                      Colunas detectadas
-                      {result.separadorDetectado && (
-                        <span className="font-normal text-emerald-600"> · separador: {result.separadorDetectado}</span>
-                      )}
+                       Colunas detectadas
+                       {result.separadorDetectado && (
+                         <span className="font-normal text-emerald-600"> · separador: {result.separadorDetectado}</span>
+                       )}
                     </p>
                     <div className="space-y-0.5">
-                      {Object.entries(result.colunasDetectadas).map(([canonical, mapped]) => (
-                        <p key={canonical} className="text-xs text-emerald-700 font-mono">
-                          {mapped}
-                        </p>
-                      ))}
+                       {Object.entries(result.colunasDetectadas).map(([canonical, mapped]) => (
+                         <p key={canonical} className="text-xs text-emerald-700 font-mono">
+                           {mapped}
+                         </p>
+                       ))}
                     </div>
                   </div>
                 )}

@@ -198,6 +198,7 @@ export async function POST(request: NextRequest) {
 
   const importErrors: string[] = [];
   let count = 0;
+  let duplicatas = 0;
 
   for (const [i, row] of rows.entries()) {
     const linha = i + 2;
@@ -244,6 +245,21 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
+    // Deduplicação: pula se já existe título idêntico em aberto
+    const { data: existente } = await supabase
+      .from('titulos')
+      .select('id')
+      .eq('cliente_id', cliente.id)
+      .eq('valor', valor)
+      .eq('data_vencimento', dataVencimento)
+      .eq('status', 'aberto')
+      .maybeSingle();
+
+    if (existente) {
+      duplicatas++;
+      continue;
+    }
+
     const { error: errTitulo } = await supabase.from('titulos').insert({
       cliente_id: cliente.id,
       valor,
@@ -275,9 +291,13 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     success: true,
     count,
+    duplicatas,
     errors: importErrors,
     colunasDetectadas,
     separadorDetectado: delimiterLabel,
-    message: `${count} título(s) importado(s)${importErrors.length > 0 ? ` · ${importErrors.length} aviso(s)` : ''}.`,
+    message:
+      `${count} título(s) importado(s)` +
+      (duplicatas > 0 ? ` · ${duplicatas} duplicata(s) ignorada(s)` : '') +
+      (importErrors.length > 0 ? ` · ${importErrors.length} aviso(s)` : ''),
   });
 }

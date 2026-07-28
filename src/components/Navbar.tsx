@@ -18,6 +18,12 @@ export default function Navbar() {
             Lista do dia
           </Link>
           <Link
+            href="/dados"
+            className="text-slate-400 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+          >
+            Dados
+          </Link>
+          <Link
             href="/upload"
             className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-3 py-1.5 rounded-lg font-medium transition-colors"
           >
