@@ -1,15 +1,12 @@
 import { supabase } from '@/lib/supabase';
-import { priorizarTitulos } from '@/lib/prioridade';
+import { priorizarTitulos, agruparPorCliente } from '@/lib/prioridade';
 import { Titulo, Cliente } from '@/types';
-import TituloCard from '@/components/TituloCard';
+import ClienteCard from '@/components/ClienteCard';
+import { formatarMoeda } from '@/lib/format';
 import Link from 'next/link';
 
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';
-
-function formatarMoeda(valor: number) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
 
 export default async function HomePage() {
   const { data: titulos, error } = await supabase
@@ -29,6 +26,15 @@ export default async function HomePage() {
 
   const titulosComClientes = (titulos ?? []) as (Titulo & { clientes: Cliente })[];
   const priorizados = priorizarTitulos(titulosComClientes);
+
+  // Cobrança é por CLIENTE, não por título — um cliente com 3 títulos em
+  // aberto aparece uma vez, com mensagem e envio de WhatsApp consolidados
+  // (lib/prioridade.ts::agruparPorCliente). Os cards de estatística no topo
+  // continuam contando títulos individuais, que é o que o texto de cada card
+  // descreve ("títulos já em atraso" / "títulos que vencem em até 3 dias").
+  const grupos = agruparPorCliente(priorizados);
+  const gruposVencidos    = grupos.filter((g) => g.diasAtrasoMax > 0);
+  const gruposPreventivos = grupos.filter((g) => g.diasAtrasoMax <= 0);
 
   const vencidos    = priorizados.filter((t) => t.diasAtraso > 0);
   const preventivos = priorizados.filter((t) => t.diasAtraso <= 0);
@@ -85,24 +91,28 @@ export default async function HomePage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {vencidos.length > 0 && (
+          {gruposVencidos.length > 0 && (
             <>
               <p className="text-xs font-semibold text-red-500 uppercase tracking-widest px-1">
                 🔴 Vencidos — cobrar hoje
               </p>
-              {vencidos.map((titulo) => (
-                <TituloCard key={titulo.id} titulo={titulo} />
-              ))}
+              <div className="space-y-3">
+                {gruposVencidos.map((grupo) => (
+                  <ClienteCard key={grupo.cliente.id} grupo={grupo} />
+                ))}
+              </div>
             </>
           )}
-          {preventivos.length > 0 && (
-            <div className={vencidos.length > 0 ? 'pt-3' : ''}>
+          {gruposPreventivos.length > 0 && (
+            <div className={gruposVencidos.length > 0 ? 'pt-3' : ''}>
               <p className="text-xs font-semibold text-amber-500 uppercase tracking-widest px-1 mb-3">
                 🟡 A vencer — enviar lembrete
               </p>
-              {preventivos.map((titulo) => (
-                <TituloCard key={titulo.id} titulo={titulo} />
-              ))}
+              <div className="space-y-3">
+                {gruposPreventivos.map((grupo) => (
+                  <ClienteCard key={grupo.cliente.id} grupo={grupo} />
+                ))}
+              </div>
             </div>
           )}
         </div>
