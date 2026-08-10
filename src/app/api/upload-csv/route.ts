@@ -3,6 +3,14 @@ import Papa from 'papaparse';
 import { supabase } from '@/lib/supabase';
 
 // ---------------------------------------------------------------------------
+// Esta rota é SOMENTE PRÉVIA — faz o parsing, a validação e checa duplicatas
+// (leitura), mas NÃO grava nada no banco. A gravação de fato acontece em
+// /api/upload-csv/confirmar, chamada depois que o usuário revisa o relatório
+// e clica em "Confirmar importação". Isso evita subir uma planilha errada
+// (data trocada, coluna mapeada errado) direto pro banco sem chance de revisar.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Mapa de aliases — colunas conhecidas de diferentes sistemas (ERP, planilhas)
 // ---------------------------------------------------------------------------
 const COLUMN_ALIASES: Record<string, string[]> = {
@@ -30,9 +38,6 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   ],
 };
 
-// ---------------------------------------------------------------------------
-// Detecção de colunas por alias (case-insensitive, ignora espaços e hifens)
-// ---------------------------------------------------------------------------
 function normalizarHeader(h: string): string {
   return h.trim().toLowerCase().replace(/[\s\-\.\/]+/g, '_');
 }
@@ -52,7 +57,7 @@ function detectarMapeamentoColunas(
     for (const alias of COLUMN_ALIASES[canonical]) {
       const idx = headerNorm.findIndex((h) => h === alias);
       if (idx !== -1) {
-        mapping[canonical] = headers[idx]; // guarda nome original para acessar no row
+        mapping[canonical] = headers[idx];
         break;
       }
     }
@@ -61,9 +66,6 @@ function detectarMapeamentoColunas(
   return { mapping, headerNorm };
 }
 
-// ---------------------------------------------------------------------------
-// Normalização de valor — aceita formatos BR e US, com e sem símbolo de moeda
-// ---------------------------------------------------------------------------
 function normalizarValor(raw: string): number {
   let s = raw.trim().replace(/^R\$\s*/, '').replace(/^\$\s*/, '').trim();
 
@@ -74,20 +76,16 @@ function normalizarValor(raw: string): number {
     const ultimoPonto  = s.lastIndexOf('.');
     const ultimaVirgula = s.lastIndexOf(',');
     if (ultimaVirgula > ultimoPonto) {
-      // BR: 1.500,00 → remover pontos, trocar vírgula por ponto
       s = s.replace(/\./g, '').replace(',', '.');
     } else {
-      // US: 1,500.00 → remover vírgulas
       s = s.replace(/,/g, '');
     }
   } else if (temVirgula) {
     const posVirgula = s.lastIndexOf(',');
     const aposVirgula = s.slice(posVirgula + 1);
     if (aposVirgula.length <= 2) {
-      // Decimal BR: 1500,00 → 1500.00
       s = s.replace(',', '.');
     } else {
-      // Milhar: 1,500 → 1500
       s = s.replace(/,/g, '');
     }
   }
@@ -95,39 +93,30 @@ function normalizarValor(raw: string): number {
   return parseFloat(s);
 }
 
-// ---------------------------------------------------------------------------
-// Normalização de data — aceita 7 formatos
-// ---------------------------------------------------------------------------
 function normalizarData(raw: string): string | null {
   const s = raw.trim();
 
-  // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // DD/MM/YYYY ou D/M/YYYY
   if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
     const [d, m, y] = s.split('/');
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // DD-MM-YYYY ou D-M-YYYY
   if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) {
     const [d, m, y] = s.split('-');
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // DD.MM.YYYY
   if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(s)) {
     const [d, m, y] = s.split('.');
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // YYYY/MM/DD
   if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) {
     return s.replace(/\//g, '-');
   }
 
-  // YYYYMMDD (compacto)
   if (/^\d{8}$/.test(s)) {
     return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
   }
@@ -135,16 +124,13 @@ function normalizarData(raw: string): string | null {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Limpeza de telefone — preserva apenas dígitos, garante prefixo +55
-// ---------------------------------------------------------------------------
 function limparTelefone(tel: string): string {
   const digits = tel.replace(/\D/g, '');
   return digits.startsWith('55') ? digits : `55${digits}`;
 }
 
 // ---------------------------------------------------------------------------
-// Route handler
+// Route handler — PRÉVIA (leitura apenas, nada é gravado aqui)
 // ---------------------------------------------------------------------------
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
@@ -155,12 +141,11 @@ export async function POST(request: NextRequest) {
 
   const text = await file.text();
 
-  // Auto-detecta separador (vírgula, ponto-e-vírgula, tab, pipe)
   const { data: rows, errors: parseErrors, meta } = Papa.parse<Record<string, string>>(text, {
     header: true,
     skipEmptyLines: true,
-    delimiter: '',          // '' = auto-detect
-    transformHeader: (h) => h.trim(), // mantém original para o mapeamento
+    delimiter: '',
+    transformHeader: (h) => h.trim(),
   });
 
   if (parseErrors.length > 0 && rows.length === 0) {
@@ -196,24 +181,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const importErrors: string[] = [];
-  let count = 0;
-  let duplicatas = 0;
-
-  // Breakdown financeiro calculado durante o processamento
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
-  const breakdown = {
-    vencidos:    { count: 0, valor: 0 },   // diasAtraso > 0 — cobrar hoje
-    preventivos: { count: 0, valor: 0 },   // 0 a -3 dias — enviar lembrete
-    futuros:     { count: 0, valor: 0 },   // > 3 dias no futuro — monitorar
-  };
+  // ---- Passo 1: parsear e validar cada linha (sem tocar no banco ainda) ----
+  const linhasValidas: {
+    linha: number;
+    nome: string;
+    telefone: string;
+    valor: number;
+    dataVencimento: string;
+  }[] = [];
   const linhasIgnoradas: { linha: number; nome: string; motivo: string }[] = [];
+  const importErrors: string[] = [];
 
   for (const [i, row] of rows.entries()) {
     const linha = i + 2;
     const nomeRaw = row[mapping.nome!]?.trim();
-
     const nome = nomeRaw || `Linha ${linha}`;
 
     if (!nomeRaw) {
@@ -250,65 +231,74 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const { data: cliente, error: errCliente } = await supabase
-      .from('clientes')
-      .upsert({ nome, telefone }, { onConflict: 'telefone' })
-      .select()
-      .single();
+    linhasValidas.push({ linha, nome, telefone, valor, dataVencimento });
+  }
 
-    if (errCliente || !cliente) {
-      linhasIgnoradas.push({ linha, nome, motivo: `Erro interno ao salvar cliente` });
-      importErrors.push(`Linha ${linha}: erro ao salvar cliente — ${errCliente?.message}`);
-      continue;
-    }
+  // ---- Passo 2: checar duplicatas contra o banco (somente leitura) ----
+  const telefonesUnicos = [...new Set(linhasValidas.map((l) => l.telefone))];
+  const { data: clientesExistentes } = telefonesUnicos.length
+    ? await supabase.from('clientes').select('id, telefone').in('telefone', telefonesUnicos)
+    : { data: [] as { id: string; telefone: string }[] };
 
-    // Deduplicação: pula se já existe título idêntico em aberto
-    const { data: existente } = await supabase
-      .from('titulos')
-      .select('id')
-      .eq('cliente_id', cliente.id)
-      .eq('valor', valor)
-      .eq('data_vencimento', dataVencimento)
-      .eq('status', 'aberto')
-      .maybeSingle();
+  const clienteIdPorTelefone = new Map(
+    (clientesExistentes ?? []).map((c) => [c.telefone, c.id]),
+  );
+  const clienteIds = [...clienteIdPorTelefone.values()];
 
-    if (existente) {
+  const { data: titulosExistentes } = clienteIds.length
+    ? await supabase
+        .from('titulos')
+        .select('cliente_id, valor, data_vencimento')
+        .in('cliente_id', clienteIds)
+        .eq('status', 'aberto')
+    : { data: [] as { cliente_id: string; valor: number; data_vencimento: string }[] };
+
+  let duplicatas = 0;
+  const linhasParaImportar: typeof linhasValidas = [];
+
+  for (const linha of linhasValidas) {
+    const clienteId = clienteIdPorTelefone.get(linha.telefone);
+    const jaExiste = clienteId
+      ? (titulosExistentes ?? []).some(
+          (t) =>
+            t.cliente_id === clienteId &&
+            Number(t.valor) === linha.valor &&
+            t.data_vencimento === linha.dataVencimento,
+        )
+      : false;
+
+    if (jaExiste) {
       duplicatas++;
-      continue;
+    } else {
+      linhasParaImportar.push(linha);
     }
+  }
 
-    const { error: errTitulo } = await supabase.from('titulos').insert({
-      cliente_id: cliente.id,
-      valor,
-      data_vencimento: dataVencimento,
-      status: 'aberto',
-    });
+  // ---- Breakdown financeiro pra exibir na prévia ----
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const breakdown = {
+    vencidos: { count: 0, valor: 0 },
+    preventivos: { count: 0, valor: 0 },
+    futuros: { count: 0, valor: 0 },
+  };
 
-    if (errTitulo) {
-      linhasIgnoradas.push({ linha, nome, motivo: `Erro interno ao salvar título` });
-      importErrors.push(`Linha ${linha}: erro ao salvar título — ${errTitulo.message}`);
-      continue;
-    }
-
-    // Classifica no breakdown
-    const venc = new Date(`${dataVencimento}T12:00:00`);
+  for (const l of linhasParaImportar) {
+    const venc = new Date(`${l.dataVencimento}T12:00:00`);
     venc.setHours(0, 0, 0, 0);
     const dias = Math.round((hoje.getTime() - venc.getTime()) / (1000 * 60 * 60 * 24));
     if (dias > 0) {
       breakdown.vencidos.count++;
-      breakdown.vencidos.valor += valor;
+      breakdown.vencidos.valor += l.valor;
     } else if (dias >= -3) {
       breakdown.preventivos.count++;
-      breakdown.preventivos.valor += valor;
+      breakdown.preventivos.valor += l.valor;
     } else {
       breakdown.futuros.count++;
-      breakdown.futuros.valor += valor;
+      breakdown.futuros.valor += l.valor;
     }
-
-    count++;
   }
 
-  // Relatório de mapeamento para exibir ao usuário
   const colunasDetectadas: Record<string, string> = {};
   for (const [canonical, original] of Object.entries(mapping)) {
     colunasDetectadas[canonical] =
@@ -326,7 +316,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     success: true,
     totalLinhas: rows.length,
-    count,
+    count: linhasParaImportar.length,
     duplicatas,
     errors: importErrors,
     linhasIgnoradas,
@@ -334,8 +324,9 @@ export async function POST(request: NextRequest) {
     separadorDetectado: delimiterLabel,
     breakdown,
     totalValor,
+    linhasValidas: linhasParaImportar, // usado pelo /confirmar — nada foi gravado ainda
     message:
-      `${count} título(s) importado(s)` +
+      `${linhasParaImportar.length} título(s) prontos pra importar` +
       (duplicatas > 0 ? ` · ${duplicatas} duplicata(s) ignorada(s)` : '') +
       (importErrors.length > 0 ? ` · ${importErrors.length} aviso(s)` : ''),
   });

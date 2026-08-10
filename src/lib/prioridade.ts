@@ -1,5 +1,5 @@
-import { Titulo, Cliente, TituloComPrioridade, Categoria } from '@/types';
-import { gerarMensagem } from './templates';
+import { Titulo, Cliente, TituloComPrioridade, Categoria, ClienteAgrupado } from '@/types';
+import { gerarMensagem, gerarMensagemConsolidada } from './templates';
 
 /** Retorna quantos dias se passaram desde o vencimento.
  *  Positivo = já vencido. Negativo = ainda vai vencer.
@@ -65,6 +65,58 @@ export function priorizarTitulos(
         new Date(a.data_vencimento).getTime() -
         new Date(b.data_vencimento).getTime(),
     );
+
+  return [...vencidos, ...preventivos];
+}
+
+// Ordem de urgência entre categorias — usada para decidir qual categoria
+// "representa" um cliente que tem títulos em mais de uma situação.
+const ORDEM_URGENCIA: Categoria[] = ['atraso_longo', 'atraso_leve', 'preventivo'];
+
+/** Agrupa títulos já priorizados por cliente — cobrar a PESSOA, não o título. */
+export function agruparPorCliente(
+  titulosPriorizados: TituloComPrioridade[],
+): ClienteAgrupado[] {
+  const grupos = new Map<string, TituloComPrioridade[]>();
+
+  for (const titulo of titulosPriorizados) {
+    const lista = grupos.get(titulo.cliente_id) ?? [];
+    lista.push(titulo);
+    grupos.set(titulo.cliente_id, lista);
+  }
+
+  const resultado: ClienteAgrupado[] = [];
+
+  for (const titulos of grupos.values()) {
+    const cliente = titulos[0].cliente;
+    const valorTotal = titulos.reduce((s, t) => s + t.valor, 0);
+    const scoreTotal = titulos.reduce((s, t) => s + t.score, 0);
+    const diasAtrasoMax = Math.max(...titulos.map((t) => t.diasAtraso));
+    const categoriaMaisUrgente =
+      ORDEM_URGENCIA.find((c) => titulos.some((t) => t.categoria === c)) ??
+      'preventivo';
+
+    const titulosOrdenados = [...titulos].sort((a, b) => b.score - a.score);
+
+    resultado.push({
+      cliente,
+      titulos: titulosOrdenados,
+      valorTotal,
+      scoreTotal,
+      categoriaMaisUrgente,
+      diasAtrasoMax,
+      mensagemConsolidada: gerarMensagemConsolidada(cliente.nome, titulosOrdenados),
+    });
+  }
+
+  // Mesma regra de antes: vencidos (por score) primeiro, depois preventivos (por urgência)
+  const vencidos = resultado
+    .filter((c) => c.diasAtrasoMax > 0)
+    .sort((a, b) => b.scoreTotal - a.scoreTotal);
+
+  const preventivos = resultado
+    .filter((c) => c.diasAtrasoMax <= 0)
+    .sort((a, b) => a.diasAtrasoMax - b.diasAtrasoMax);
 
   return [...vencidos, ...preventivos];
 }

@@ -13,7 +13,7 @@ O problema que ele resolve é simples e comum: **quem ligar primeiro hoje?** Sem
 
 O Atlas faz tudo isso automaticamente:
 
-1. Você sobe uma planilha CSV com os títulos do dia.
+1. Você sobe uma planilha CSV, revisa uma prévia (nada é gravado ainda) e confirma a importação.
 2. O sistema calcula quem tem prioridade (baseado em dias de atraso e valor em risco).
 3. Exibe uma lista ordenada com a mensagem de cobrança já escrita para cada cliente.
 4. Com um clique você abre o WhatsApp com a mensagem pronta.
@@ -71,16 +71,17 @@ Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor v
 
 > Títulos que vencem em mais de 3 dias **não aparecem** — o sistema só mostra o que é urgente.
 
-**Dentro de cada card de título:**
+**Os cards são agrupados por cliente, não por título.** Se um cliente tem 3 títulos em aberto, ele aparece uma única vez na lista — cobrar a pessoa, não cada título isolado, evita mandar várias mensagens separadas pra mesma pessoa no mesmo dia.
 
-- Nome do cliente (clicável → abre o histórico)
-- Valor em destaque
-- Badge indicando quantos dias em atraso ou quantos dias faltam
-- A **mensagem de cobrança gerada automaticamente** (texto pronto para copiar ou enviar)
-- Botão **"Enviar via WhatsApp"** — abre o WhatsApp já com a mensagem preenchida
-- Botões de resultado: **Pago**, **Prometeu pagar**, **Sem resposta**
+**Dentro de cada card de cliente:**
 
-Ao registrar um resultado, o título desaparece da lista imediatamente.
+- Nome do cliente (clicável → abre o histórico) e telefone
+- Valor total em aberto e quantidade de títulos
+- A **mensagem de cobrança consolidada**, gerada automaticamente (texto pronto para copiar ou enviar)
+- Botão **"Enviar via WhatsApp"** — abre o WhatsApp com a mensagem consolidada preenchida e registra o envio em todos os títulos em aberto daquele cliente
+- Uma lista compacta com cada título individual do cliente: valor, badge de dias em atraso/a vencer, e seus próprios botões de resultado — **Pago**, **Prometeu pagar**, **Sem resposta** — porque o cliente pode pagar um título e não outro
+
+Ao registrar um resultado, aquele título some da lista de pendentes. O card do cliente continua aparecendo enquanto ele tiver outros títulos em aberto.
 
 ---
 
@@ -88,12 +89,15 @@ Ao registrar um resultado, o título desaparece da lista imediatamente.
 
 Tela para subir um arquivo CSV com os títulos de cobrança.
 
-**Como funciona o upload:**
+**Como funciona o upload (duas etapas — prévia e confirmação):**
 
-1. Você seleciona o arquivo `.csv`.
-2. O sistema mostra um preview local (quantas linhas e qual separador foi detectado).
-3. Ao clicar em "Importar títulos", o arquivo é processado no servidor.
-4. O resultado mostra quantos títulos foram importados, duplicatas ignoradas e eventuais avisos por linha.
+1. Você seleciona o arquivo `.csv`. O sistema mostra um preview local instantâneo (linhas detectadas e separador).
+2. Ao clicar em **"Analisar planilha"**, o arquivo é processado no servidor — mas **nada é gravado no banco ainda**. Essa etapa é só leitura: valida cada linha, detecta duplicatas contra o que já existe no sistema e monta uma prévia.
+3. A prévia mostra: quantos títulos estão prontos pra importar, quantas duplicatas e linhas ignoradas, quais colunas foram identificadas, o separador detectado, e uma **análise financeira** do que seria importado (quanto já está vencido, quanto vence em até 3 dias, quanto é vencimento futuro).
+4. Você revisa e só então clica em **"Confirmar importação"** — é nesse momento que clientes e títulos são de fato gravados no banco. A checagem de duplicata é refeita nesse passo por segurança.
+5. O relatório final mostra quantos títulos foram importados, duplicatas ignoradas e eventuais erros de gravação.
+
+> Essa separação em duas etapas existe para evitar subir uma planilha errada (coluna mapeada errado, data trocada) direto pro banco sem chance de revisão.
 
 **O sistema é inteligente no reconhecimento de colunas.** Ele aceita muitos nomes diferentes para cada campo — útil para planilhas exportadas de diferentes ERPs ou sistemas:
 
@@ -209,6 +213,8 @@ O sistema usa três templates, um para cada categoria:
 
 O template preenche automaticamente: primeiro nome do cliente, valor formatado em R$, data de vencimento e quantidade de dias.
 
+Quando um cliente tem mais de um título em aberto, o sistema não manda uma mensagem por título — ele gera **uma mensagem consolidada**, listando todos os valores e vencimentos, com abertura e fechamento adaptados a se há título vencido entre eles ou não.
+
 ---
 
 ## Status dos títulos
@@ -276,13 +282,14 @@ interacoes
 
 ### 2. Criar o banco de dados
 
-No painel do Supabase, vá em **SQL Editor** e execute o conteúdo do arquivo:
+No painel do Supabase, vá em **SQL Editor** e execute, nesta ordem:
 
 ```
 supabase/schema.sql
+supabase/rls.sql
 ```
 
-Isso cria as três tabelas (`clientes`, `titulos`, `interacoes`) e os índices necessários.
+O `schema.sql` cria as três tabelas (`clientes`, `titulos`, `interacoes`) e os índices necessários. O `rls.sql` habilita Row Level Security nelas — **passo obrigatório**, sem ele os dados ficam acessíveis por qualquer pessoa que tenha a URL do projeto e a chave anônima (que ficam visíveis no navegador por design do Supabase).
 
 ### 3. Variáveis de ambiente
 
@@ -297,11 +304,18 @@ cp .env.local.example .env.local
 NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sua-chave-anonima-aqui
 
-# Senha de acesso ao painel (remova ou deixe vazio para desabilitar)
+# Supabase → Settings > API > Project API keys > service_role
+# NUNCA prefixar com NEXT_PUBLIC_. É a única forma do app acessar o banco
+# depois que RLS está habilitado (passo 2), porque ela ignora RLS por
+# definição e só é usada no servidor — nunca é enviada ao navegador.
+SUPABASE_SERVICE_ROLE_KEY=sua-chave-service-role-aqui
+
+# Senha de acesso ao painel — defina uma senha real antes de qualquer deploy
+# acessível pela internet. Deixar vazio desabilita a proteção.
 APP_PASSWORD=sua-senha-aqui
 ```
 
-> Se `APP_PASSWORD` não for definida, o sistema funciona sem autenticação — ideal para desenvolvimento local.
+> Se `APP_PASSWORD` não for definida, o sistema funciona sem autenticação — use isso **apenas** em desenvolvimento local, nunca em produção.
 
 ### 4. Instalar e rodar
 
@@ -327,25 +341,27 @@ npm run lint    # verifica o código com ESLint
 ```
 src/
 ├── app/
-│   ├── page.tsx               # Lista do dia (home)
+│   ├── page.tsx               # Lista do dia (home) — clientes agrupados por prioridade
 │   ├── login/page.tsx         # Tela de login
-│   ├── upload/page.tsx        # Importar CSV
+│   ├── upload/page.tsx        # Importar CSV (prévia + confirmação)
 │   ├── dados/page.tsx         # Gerenciar dados
 │   ├── clientes/[id]/page.tsx # Histórico do cliente
 │   └── api/
-│       ├── login/route.ts     # Autenticação
-│       ├── upload-csv/route.ts # Processamento do CSV
-│       └── dados/route.ts     # Estatísticas e limpeza
+│       ├── login/route.ts                # Autenticação
+│       ├── upload-csv/route.ts           # Prévia do CSV (só leitura, não grava nada)
+│       ├── upload-csv/confirmar/route.ts # Confirmação — grava clientes e títulos no banco
+│       └── dados/route.ts                # Estatísticas e limpeza
 ├── components/
-│   ├── TituloCard.tsx         # Card de cada título na lista
+│   ├── ClienteCard.tsx        # Card do cliente — agrupa títulos, mensagem e envio de WhatsApp consolidados
+│   ├── TituloCard.tsx         # Linha de um título individual, dentro do ClienteCard
 │   ├── Navbar.tsx             # Barra de navegação
 │   └── NavbarWrapper.tsx      # Oculta navbar na tela de login
 ├── lib/
 │   ├── supabase.ts            # Cliente do banco de dados
-│   ├── prioridade.ts          # Algoritmo de priorização
-│   └── templates.ts           # Templates das mensagens de cobrança
+│   ├── prioridade.ts          # Algoritmo de priorização e agrupamento por cliente
+│   └── templates.ts           # Templates das mensagens de cobrança (individuais e consolidadas)
 ├── actions/
-│   └── index.ts               # Server action para atualizar status
+│   └── index.ts               # Server actions para registrar envio e atualizar status
 ├── types/
 │   └── index.ts               # Tipos TypeScript compartilhados
 └── proxy.ts                   # Middleware de autenticação
@@ -361,12 +377,13 @@ Siga estes passos para validar o funcionamento completo do sistema:
 
 1. Acesse o sistema e faça login com a senha fornecida.
 2. Vá em **"+ Importar CSV"** e suba um arquivo `.csv` (modelo na seção de upload acima).
-3. Confirme que a mensagem de sucesso mostra o número correto de títulos importados.
-4. Clique em **"Ver lista do dia"** e verifique se os títulos aparecem nas seções corretas (vencidos vs. a vencer).
-5. Em um título vencido, clique em **"Enviar via WhatsApp"** e confirme que o WhatsApp abre com a mensagem pré-preenchida.
-6. Volte ao Atlas e registre o resultado como **"Pago"**. O card deve desaparecer da lista.
-7. Repita com **"Prometeu pagar"** — deve pedir uma data antes de confirmar.
-8. Repita com **"Sem resposta"** — deve desaparecer sem pedir data.
+3. Clique em **"Analisar planilha"** e confira a prévia: número de títulos prontos, duplicatas, colunas identificadas e a análise financeira. Nada foi gravado no banco ainda nesse ponto.
+4. Clique em **"Confirmar importação"** e confirme que o relatório final mostra o número correto de títulos importados.
+5. Clique em **"Ver lista do dia"** e verifique se os clientes aparecem nas seções corretas (vencidos vs. a vencer).
+6. Em um cliente vencido, clique em **"Enviar via WhatsApp"** e confirme que o WhatsApp abre com a mensagem consolidada pré-preenchida (se o cliente tiver mais de um título em aberto, a mensagem deve citar todos).
+7. Volte ao Atlas e, num dos títulos daquele cliente, registre o resultado como **"Pago"**. Aquele título deve desaparecer da lista — o card do cliente continua visível se ele ainda tiver outros títulos em aberto.
+8. Repita com **"Prometeu pagar"** — deve pedir uma data antes de confirmar.
+9. Repita com **"Sem resposta"** — deve desaparecer sem pedir data.
 
 ### Cenário 2 — Histórico do cliente
 
@@ -375,8 +392,8 @@ Siga estes passos para validar o funcionamento completo do sistema:
 
 ### Cenário 3 — Deduplicação no CSV
 
-1. Suba o mesmo arquivo CSV duas vezes.
-2. Na segunda importação, o sistema deve informar que X título(s) foram ignorados por duplicação.
+1. Suba o mesmo arquivo CSV duas vezes (analisando e confirmando a primeira).
+2. Na segunda vez, já na etapa de prévia (antes de confirmar), o sistema deve informar que X título(s) seriam ignorados por duplicação.
 
 ### Cenário 4 — CSV com colunas diferentes
 

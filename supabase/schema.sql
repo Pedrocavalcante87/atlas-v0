@@ -31,3 +31,5 @@ create table if not exists interacoes (
 create index if not exists idx_titulos_status       on titulos(status);
 create index if not exists idx_titulos_cliente_id   on titulos(cliente_id);
 create index if not exists idx_interacoes_titulo_id on interacoes(titulo_id);
+
+

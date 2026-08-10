@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -15,7 +15,15 @@ interface LinhaIgnorada {
   motivo: string;
 }
 
-interface UploadResult {
+interface LinhaValida {
+  linha: number;
+  nome: string;
+  telefone: string;
+  valor: number;
+  dataVencimento: string;
+}
+
+interface PreviewResult {
   message: string;
   totalLinhas: number;
   count: number;
@@ -30,6 +38,14 @@ interface UploadResult {
     futuros: BreakdownGroup;
   };
   totalValor: number;
+  linhasValidas: LinhaValida[];
+}
+
+interface ConfirmResult {
+  count: number;
+  duplicatas: number;
+  errors: string[];
+  message: string;
 }
 
 interface FilePreview {
@@ -56,7 +72,9 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<UploadResult | null>(null);
+  const [result, setResult] = useState<PreviewResult | null>(null);
+  const [confirmResult, setConfirmResult] = useState<ConfirmResult | null>(null);
+  const [confirmando, setConfirmando] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -64,6 +82,7 @@ export default function UploadPage() {
   async function handleFileSelect(selectedFile: File) {
     setFile(selectedFile);
     setResult(null);
+    setConfirmResult(null);
     setError('');
     const text = await selectedFile.text();
     setPreview(analisarCSVLocal(text));
@@ -75,6 +94,7 @@ export default function UploadPage() {
     setLoading(true);
     setError('');
     setResult(null);
+    setConfirmResult(null);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -90,6 +110,33 @@ export default function UploadPage() {
     setLoading(false);
   }
 
+  async function handleConfirmar() {
+    if (!result) return;
+    setConfirmando(true);
+
+    const res = await fetch('/api/upload-csv/confirmar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linhas: result.linhasValidas }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      setError(data.error ?? 'Erro ao confirmar importação.');
+    } else {
+      setConfirmResult(data);
+    }
+    setConfirmando(false);
+  }
+
+  function reiniciar() {
+    setResult(null);
+    setConfirmResult(null);
+    setFile(null);
+    setPreview(null);
+    if (inputRef.current) inputRef.current.value = '';
+  }
+
   return (
     <main className="max-w-3xl mx-auto px-4 py-6">
       <div className="mb-6">
@@ -102,16 +149,14 @@ export default function UploadPage() {
         <p className="text-sm text-slate-500 mt-0.5">Suba um CSV para adicionar titulos a lista de cobranca</p>
       </div>
 
-      {result ? (
-        <ImportReport
+      {confirmResult ? (
+        <ConfirmedReport result={confirmResult} onNovo={reiniciar} onVerLista={() => router.push('/')} />
+      ) : result ? (
+        <PreviewReport
           result={result}
-          onNovo={() => {
-            setResult(null);
-            setFile(null);
-            setPreview(null);
-            if (inputRef.current) inputRef.current.value = '';
-          }}
-          onVerLista={() => router.push('/')}
+          confirmando={confirmando}
+          onConfirmar={handleConfirmar}
+          onCancelar={reiniciar}
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-5">
@@ -175,7 +220,7 @@ export default function UploadPage() {
                       {preview.linhas} {preview.linhas !== 1 ? 'linhas detectadas' : 'linha detectada'}
                     </p>
                     <p className="text-blue-600 text-xs mt-0.5">
-                      Separador: {preview.separador} &middot; Clique em &quot;Importar&quot; para analisar
+                      Separador: {preview.separador} &middot; Clique em &quot;Analisar&quot; pra ver a prévia
                     </p>
                   </div>
                 </div>
@@ -199,10 +244,13 @@ export default function UploadPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Analisando e importando...
+                    Analisando...
                   </span>
-                ) : 'Importar e analisar'}
+                ) : 'Analisar planilha'}
               </button>
+              <p className="text-xs text-slate-400 text-center">
+                Isso só analisa o arquivo. Nada é gravado até você confirmar na próxima tela.
+              </p>
             </form>
           </div>
 
@@ -237,25 +285,40 @@ export default function UploadPage() {
   );
 }
 
-function ImportReport({
+// ---------------------------------------------------------------------------
+// Prévia — mostra o que SERIA importado, mas ainda não gravou nada.
+// ---------------------------------------------------------------------------
+function PreviewReport({
   result,
-  onNovo,
-  onVerLista,
+  confirmando,
+  onConfirmar,
+  onCancelar,
 }: {
-  result: UploadResult;
-  onNovo: () => void;
-  onVerLista: () => void;
+  result: PreviewResult;
+  confirmando: boolean;
+  onConfirmar: () => void;
+  onCancelar: () => void;
 }) {
   const totalIgnoradas = result.linhasIgnoradas.length;
   const temProblemas = totalIgnoradas > 0 || result.duplicatas > 0;
 
   return (
     <div className="space-y-4">
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-2.5 text-sm">
+        <span className="shrink-0 mt-0.5">&#128203;</span>
+        <div>
+          <p className="text-amber-800 font-semibold">Isso é uma prévia — nada foi gravado ainda</p>
+          <p className="text-amber-700 text-xs mt-0.5">
+            Confira os números abaixo e só clique em &quot;Confirmar importação&quot; se estiver tudo certo.
+          </p>
+        </div>
+      </div>
+
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="bg-slate-900 px-5 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-white font-semibold text-base">Relatorio de importacao</p>
+              <p className="text-white font-semibold text-base">Prévia da importação</p>
               <p className="text-slate-400 text-xs mt-0.5">
                 {result.totalLinhas} {result.totalLinhas !== 1 ? 'linhas' : 'linha'} no arquivo &middot; separador: {result.separadorDetectado}
               </p>
@@ -267,7 +330,7 @@ function ImportReport({
         <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100">
           <div className="px-4 py-3 text-center">
             <p className="text-xl font-bold text-emerald-600">{result.count}</p>
-            <p className="text-xs text-slate-500 mt-0.5">Importados</p>
+            <p className="text-xs text-slate-500 mt-0.5">Prontos p/ importar</p>
           </div>
           <div className="px-4 py-3 text-center">
             <p className={`text-xl font-bold ${result.duplicatas > 0 ? 'text-amber-500' : 'text-slate-300'}`}>{result.duplicatas}</p>
@@ -295,7 +358,7 @@ function ImportReport({
       {result.count > 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100">
-            <p className="text-sm font-semibold text-slate-700">Analise financeira dos titulos importados</p>
+            <p className="text-sm font-semibold text-slate-700">Análise financeira do que seria importado</p>
             <p className="text-xs text-slate-400 mt-0.5">
               Total: <span className="font-semibold text-slate-700">{moeda(result.totalValor)}</span>
             </p>
@@ -333,8 +396,8 @@ function ImportReport({
       {temProblemas && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100">
-            <p className="text-sm font-semibold text-slate-700">Linhas nao importadas</p>
-            <p className="text-xs text-slate-400 mt-0.5">Revise o arquivo original para corrigir estas entradas</p>
+            <p className="text-sm font-semibold text-slate-700">Linhas que não vão ser importadas</p>
+            <p className="text-xs text-slate-400 mt-0.5">Revise o arquivo original para corrigir estas entradas, se quiser</p>
           </div>
 
           {result.duplicatas > 0 && (
@@ -357,6 +420,63 @@ function ImportReport({
                 </p>
                 <p className="text-xs text-red-600 mt-0.5">{item.motivo}</p>
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        {result.count > 0 && (
+          <button
+            onClick={onConfirmar}
+            disabled={confirmando}
+            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50"
+          >
+            {confirmando ? 'Importando...' : `Confirmar importação (${result.count})`}
+          </button>
+        )}
+        <button
+          onClick={onCancelar}
+          disabled={confirmando}
+          className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold py-3 rounded-xl transition-colors disabled:opacity-50"
+        >
+          Cancelar / trocar arquivo
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Relatório final — depois que o usuário confirmou e os dados JÁ foram gravados.
+// ---------------------------------------------------------------------------
+function ConfirmedReport({
+  result,
+  onNovo,
+  onVerLista,
+}: {
+  result: ConfirmResult;
+  onNovo: () => void;
+  onVerLista: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-start gap-2.5 text-sm">
+        <span className="shrink-0 mt-0.5">&#9989;</span>
+        <div>
+          <p className="text-emerald-800 font-semibold">Importação concluída</p>
+          <p className="text-emerald-700 text-xs mt-0.5">{result.message}</p>
+        </div>
+      </div>
+
+      {result.errors.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <p className="text-sm font-semibold text-slate-700">Erros durante a gravação</p>
+          </div>
+          {result.errors.map((err, i) => (
+            <div key={i} className="px-5 py-3 border-b border-slate-50 last:border-0 text-sm text-red-600">
+              {err}
             </div>
           ))}
         </div>

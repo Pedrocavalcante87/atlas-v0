@@ -34,3 +34,15 @@ export interface TituloComPrioridade extends Omit<Titulo, 'clientes'> {
   diasAtraso: number; // positivo = dias em atraso; negativo = dias até vencer
   mensagem: string;
 }
+
+// Um cliente pode ter vários títulos em aberto ao mesmo tempo — agrupamos
+// para que o financeiro cobre a PESSOA uma vez, não cada título separado.
+export interface ClienteAgrupado {
+  cliente: Cliente;
+  titulos: TituloComPrioridade[];
+  valorTotal: number;
+  scoreTotal: number;
+  categoriaMaisUrgente: Categoria;
+  diasAtrasoMax: number; // maior diasAtraso entre os títulos do cliente
+  mensagemConsolidada: string;
+}

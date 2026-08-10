@@ -1,1 +1,221 @@
 @AGENTS.md
+
+# Atlas — Contexto para Claude Code
+
+Painel de priorização de cobrança para pequenos negócios (CSV de títulos em aberto → lista
+priorizada → mensagem pronta → WhatsApp manual → registro de resultado). Para o que o produto
+faz, ver [README.md](README.md). Para arquitetura, módulos, fluxos de dados, duplicações e
+inconsistências detalhadas, ver [ARCHITECTURE.md](ARCHITECTURE.md) — **não repita esse conteúdo
+aqui, leia o documento**.
+
+Este arquivo é sobre como atuar neste projeto especificamente, mais os fatos que uma sessão nova
+precisa antes de tocar em qualquer coisa.
+
+---
+
+## Regras permanentes de atuação
+
+1. **Entenda antes de alterar.** Antes de mexer em código relevante, identifique onde ele vive,
+   quem o chama, quais dependências e contratos ele carrega, e que efeitos colaterais uma mudança
+   pode ter. Não altere código só para descobrir como ele funciona — leia.
+2. **Preserve o sistema existente.** O Atlas já existe e está em uso. Prefira mudanças
+   incrementais e localizadas. Não refatore nem reorganize partes não relacionadas à tarefa pedida.
+3. **Autonomia técnica.** Decisões pequenas e reversíveis não precisam de aprovação prévia —
+   escolha com base em simplicidade, consistência com o que já existe, manutenibilidade, segurança
+   e impacto, e prossiga.
+4. **Mudanças arquiteturais exigem análise antes de código.** Se for estrutural, de alto impacto
+   ou puder alterar um contrato (schema, formato de resposta de API, regra financeira), explique
+   problema, evidência, alternativas, decisão e trade-offs antes de implementar.
+5. **Separe fato de hipótese.** Fato = confirmado no código/config/teste/documentação. Hipótese =
+   interpretação ainda não validada. Nunca apresente hipótese como se fosse fato.
+6. **Não invente contexto.** Regra de negócio, requisito, comportamento de API ou intenção de
+   design que não estiver no código ou na documentação não deve ser assumido — investigue ou
+   sinalize a incerteza.
+7. **Evite overengineering.** Sem abstrações prematuras, camadas ou dependências novas sem
+   benefício concreto e imediato para a tarefa em mãos.
+8. **Regras de negócio são contrato.** Antes de alterar cálculo de prioridade, categorização,
+   templates de mensagem ou regra de deduplicação, veja quem consome (ver `lib/prioridade.ts` e
+   `lib/templates.ts` em ARCHITECTURE.md §5). Mudança com efeito financeiro/operacional pede
+   cautela extra.
+9. **Segurança é requisito**, não opcional, em tudo que toca autenticação, o cookie de sessão,
+   Supabase (service_role vs anon), dados de cliente/telefone, ou as rotas de importação/exclusão
+   de dados. Nunca exponha secrets (ver `.env.local`, nunca commitado — está no `.gitignore`).
+10. **Teste o que alterar.** Não há suíte automatizada neste projeto (ver §Testes abaixo) — rode ao
+    menos `npm run lint` e `npx tsc --noEmit`, e valide o fluxo manualmente via `npm run dev`
+    quando a mudança afetar UI ou dado.
+11. **Revise criticamente depois de implementar.** Procure bug, regressão, edge case, duplicação
+    nova, complexidade desnecessária e problema de segurança antes de considerar concluído.
+12. **Respeite o escopo.** Implemente o que foi pedido. Se achar problema não relacionado,
+    registre e explique o impacto em vez de consertar por conta própria dentro da mesma tarefa.
+13. **Git com rastreabilidade.** Rode `git status`/`git diff` antes de mudanças relevantes — **o
+    working tree deste repositório costuma divergir bastante do último commit** (ver §Estado do
+    git). Revise o diff depois de alterar. Nunca faça commit sem pedido explícito.
+14. **Documentação no lugar certo.** Fato arquitetural novo vai para `ARCHITECTURE.md`; este
+    arquivo (`CLAUDE.md`) é para regra de comportamento, contexto essencial e comandos — não para
+    documentação extensa de sistema.
+
+---
+
+## Stack (confirmado em `package.json`)
+
+| Camada | Tecnologia | Versão |
+|---|---|---|
+| Framework | Next.js — **App Router** | 16.2.12 |
+| UI | React | 19.2.4 |
+| Estilo | Tailwind CSS | v4 (via `@tailwindcss/postcss`, `@import "tailwindcss"` em `globals.css`) |
+| Linguagem | TypeScript | ^5, `strict: true` |
+| Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
+| Parse de CSV | PapaParse | ^5.5.4 |
+| Lint | ESLint | ^9, `eslint-config-next` |
+
+### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
+
+O `AGENTS.md` (importado no topo deste arquivo) avisa que esta versão do Next.js difere do que
+está no seu conhecimento de treino. Isso **já se manifestou no código real**: o middleware de
+autenticação está em `src/proxy.ts`, não `src/middleware.ts` — no Next 16 o antigo "Middleware"
+foi renomeado para "Proxy" (confirmado em
+`node_modules/next/dist/docs/01-app/01-getting-started/16-proxy.md`). Antes de escrever qualquer
+código que dependa de uma convenção do Next.js, confira `node_modules/next/dist/docs/`.
+
+---
+
+## Comandos
+
+```bash
+npm run dev     # servidor de desenvolvimento (localhost:3000)
+npm run build   # build de produção
+npm run start   # serve o build de produção
+npm run lint    # ESLint
+```
+
+Não existe `npm test` nem qualquer test runner nas dependências — **não há testes automatizados
+no projeto** (fato, não ausência de registro). A verificação disponível hoje é lint + type-check
+(`npx tsc --noEmit`, não tem script próprio) + execução manual via `npm run dev`.
+
+---
+
+## Estrutura (visão rápida — detalhes em ARCHITECTURE.md)
+
+```
+src/
+├── app/            # rotas (App Router) + API routes em app/api/*/route.ts
+├── components/      # componentes de UI ('use client' onde há interação)
+├── lib/              # domínio sem I/O (prioridade, templates) + client Supabase
+├── actions/           # Server Actions ('use server')
+├── types/              # tipos TS compartilhados
+├── proxy.ts             # middleware de autenticação (ver aviso acima sobre Next 16)
+supabase/
+├── schema.sql            # DDL — rodar primeiro no SQL Editor do Supabase
+└── rls.sql                # habilita RLS sem políticas — rodar depois do schema
+```
+
+Não existe camada de repositório/DAO: toda leitura/escrita ao banco é feita chamando
+`lib/supabase.ts` diretamente de Server Components, Server Actions ou API routes. Isso é o padrão
+real do projeto — seguir o mesmo padrão em código novo é consistente com o resto, não é atalho.
+
+---
+
+## Convenções observadas no código existente
+
+- **Nomenclatura de domínio em português** (`cliente`, `titulo`, `interacao`, `dias_atraso`,
+  `vencimento`) mesmo com identificadores de código em `camelCase`. Preserve — é o vocabulário do
+  domínio, não uma inconsistência a "corrigir".
+- **Comentários explicam o porquê, não o quê** (ver `lib/prioridade.ts`, `lib/templates.ts`,
+  `actions/index.ts`). Ex.: por que a mensagem é consolidada por cliente, por que a checagem de
+  duplicata é refeita na confirmação do CSV. Siga esse estilo — comentário só quando há uma razão
+  não óbvia por trás da linha.
+- **Server Components fazem query direta ao Supabase** é o padrão majoritário para leitura
+  (`app/page.tsx`, `app/clientes/[id]/page.tsx`). `app/dados/page.tsx` é a única exceção (Client
+  Component + `fetch` para API route) — não é o padrão a copiar sem motivo.
+- **Mutação mistura Server Actions e API routes** sem critério documentado: ações da lista do dia
+  usam Server Actions (`actions/index.ts`); importação de CSV e limpeza de dados usam API routes
+  chamadas via `fetch` no client. Registrado como inconsistência real em ARCHITECTURE.md §8 — não
+  tente unificar sem que a tarefa peça isso.
+- **Tailwind inline, sem CSS modules/styled-components.** Paleta: `slate` (neutro), `red`
+  (vencido/urgente), `amber` (atenção/preventivo), `blue` (informativo/preventivo), `emerald`
+  (sucesso/pago). Cards em `rounded-xl`/`rounded-2xl`, `shadow-sm`, `border-slate-200`.
+- **`'use client'` só onde há estado/interação** (formulários, botões com handler). Páginas que só
+  leem e renderizam são Server Components por padrão.
+
+---
+
+## Particularidades de domínio que já são "regra", não sugestão
+
+- **Categorização de urgência**: `> 7 dias` de atraso = `atraso_longo`; `1–7 dias` =
+  `atraso_leve`; vence hoje até `+3 dias` = `preventivo`; vencimento `> 3 dias` no futuro **não
+  aparece** na lista do dia. Fonte oficial: `lib/prioridade.ts::categorizarTitulo`. Esse mesmo
+  corte está reimplementado de forma independente em `api/upload-csv/route.ts` (breakdown da
+  prévia) e em `api/dados/route.ts` (com lógica de data diferente, comparação de string) — ver
+  ARCHITECTURE.md §6. Ao mudar o corte de dias, os três lugares precisam ser atualizados
+  manualmente; não há teste que pegue o esquecimento.
+- **Score de priorização** = `dias_em_atraso × valor`, maior primeiro. Só se aplica a vencidos;
+  preventivos ordenam por vencimento mais próximo.
+- **Cobrança é por cliente, não por título**: um cliente com vários títulos em aberto recebe uma
+  mensagem e um envio de WhatsApp consolidados (`lib/prioridade.ts::agruparPorCliente`,
+  `ClienteCard.tsx`). Cada título individual mantém seu próprio controle de status.
+- **`telefone` é a chave de upsert de cliente** (`onConflict: 'telefone'` em
+  `upload-csv/confirmar/route.ts`). Dois clientes reais com o mesmo número se fundem
+  silenciosamente sob o mesmo registro — comportamento atual, não validado contra esse caso.
+- **Importação de CSV é sempre em duas chamadas**: `POST /api/upload-csv` só valida e retorna
+  prévia (nada é gravado); `POST /api/upload-csv/confirmar` recebe de volta as linhas que o
+  próprio browser guardou da prévia e só então grava. A rota de confirmação **não revalida** os
+  dados recebidos além de checar se é um array não vazio — ver nota de segurança abaixo.
+- **Status de título**: `aberto | pago | promessa | sem_resposta` (CHECK constraint no banco,
+  `supabase/schema.sql`). Toda mudança de status gera/atualiza uma linha em `interacoes`.
+
+---
+
+## Banco de dados / Supabase
+
+- Ordem de execução obrigatória no SQL Editor do Supabase: `supabase/schema.sql` **depois**
+  `supabase/rls.sql`.
+- RLS está habilitado nas 3 tabelas **sem nenhuma política** — isso bloqueia totalmente a chave
+  anônima (exposta no browser por design do Supabase). Todo acesso do app passa pela
+  `SUPABASE_SERVICE_ROLE_KEY`, usada só em `lib/supabase.ts`, só no servidor. **Não crie política
+  de RLS nem use a chave anônima no client** — isso quebraria o modelo de segurança atual.
+  Qualquer necessidade de acesso direto do browser ao banco exigiria repensar esse modelo, não
+  ajustá-lo pontualmente.
+- Client Supabase é um singleton lazy-init via `Proxy` (`lib/supabase.ts`) — existe assim
+  especificamente para não quebrar o build do Next.js quando as env vars ainda não estão
+  disponíveis nesse momento. Não trocar por instanciação direta no topo do módulo.
+
+---
+
+## Pontos de segurança a ter em mente ao mexer perto
+
+- `POST /api/upload-csv/confirmar` grava no banco a partir de dados que o próprio browser reenvia
+  — a rota não revalida telefone/valor/data (só checa se é array não vazio). Se for tocar nessa
+  rota, considere se a tarefa também deveria adicionar revalidação — não é escopo automático, mas
+  é um risco real já mapeado (ARCHITECTURE.md §9).
+- `DELETE /api/dados?modo=tudo` apaga todos os dados de forma irreversível; a única proteção é a
+  senha global do app — a confirmação "tem certeza?" existe só na UI, não no servidor.
+- Comparação de senha em `api/login/route.ts` é `!==` direto (não constant-time).
+- Nenhuma das rotas acima tem rate limiting.
+
+---
+
+## Estado do git (observado, não uma regra fixa — pode já ter mudado)
+
+- Repositório real é `atlas/` (a pasta um nível acima não é um repo git). Branch `main`, remote
+  `origin` → `github.com/Pedrocavalcante87/atlas-v0`.
+- No momento da escrita deste arquivo, o working tree tinha mudanças substanciais não commitadas
+  em cima do último commit (`b0485fc`) — incluindo funcionalidades inteiras já em uso
+  (`ClienteCard.tsx`, a rota `/api/upload-csv/confirmar`, `supabase/rls.sql`) que ainda não tinham
+  sido commitadas. **Não assuma que o HEAD do git reflete o estado real do código** — sempre rode
+  `git status`/`git diff` antes de avaliar o que já existe.
+- **Achado a investigar**: existe um `src/middleware.ts` vazio e não rastreado, ao lado do
+  `src/proxy.ts` (que é o arquivo real e funcional, na convenção correta do Next.js 16 — ver aviso
+  acima). Isso é exatamente o problema que o commit `d5f364d` ("fix: remover middleware.ts vazio
+  que conflitava com proxy.ts") já corrigiu uma vez antes. **Hipótese, não fato confirmado**: pode
+  ter sido recriado por engano (IDE, merge, cópia manual). Vale confirmar com quem está mexendo no
+  projeto se é intencional antes de removê-lo — não removi por estar fora do escopo desta tarefa.
+
+---
+
+## Referências
+
+- [README.md](README.md) — o que o produto faz, telas, formatos de CSV aceitos, roteiro de teste.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — módulos, dependências, fluxos de dados completos,
+  duplicações, inconsistências arquiteturais e recomendações detalhadas.
+- [AGENTS.md](AGENTS.md) — aviso sobre breaking changes do Next.js 16 (importado no topo deste
+  arquivo).
