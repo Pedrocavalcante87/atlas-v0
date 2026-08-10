@@ -63,6 +63,11 @@ Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor v
 | **Vencidos** | Quantidade de títulos já em atraso |
 | **A vencer** | Títulos que vencem hoje ou nos próximos 3 dias |
 | **Em risco** | Soma em reais de todos os títulos vencidos |
+| **Recuperado** | Quanto foi efetivamente pago nos últimos 30 dias |
+
+> O card **Recuperado** é a métrica que mais importa: é o dinheiro que voltou para o caixa. Se
+> aparecer "—", a apuração não pôde ser feita (normalmente falta rodar a migration do banco) —
+> o Atlas mostra um traço em vez de R$ 0,00 de propósito, porque zero seria uma afirmação falsa.
 
 **Seções da lista:**
 
@@ -221,10 +226,16 @@ Quando um cliente tem mais de um título em aberto, o sistema não manda uma men
 
 | Status | Significado |
 |---|---|
-| `aberto` | Pendente — aparece na lista do dia |
-| `pago` | Confirmado como pago — sai da lista |
-| `promessa` | Cliente prometeu pagar em uma data específica — sai da lista |
-| `sem_resposta` | Contato feito, sem retorno — sai da lista |
+| `aberto` | Pendente — aparece na lista do dia quando fica urgente |
+| `pago` | Confirmado como pago — **único status que encerra o título de vez** |
+| `promessa` | Cliente prometeu pagar numa data — sai da lista e **volta nessa data** |
+| `sem_resposta` | Contato feito, sem retorno — sai da lista e **volta em 3 dias** |
+
+> **Cobrança é um processo, não um evento.** Nenhuma dívida some da operação permanentemente sem
+> ter sido paga. Se o cliente prometeu pagar dia 20, o título reaparece na lista no dia 20; se não
+> respondeu, reaparece depois de alguns dias para uma nova tentativa. Quando um título volta, ele
+> vem marcado com o motivo ("prometeu e não pagou" / "sem resposta antes") para você saber que já
+> falou com essa pessoa.
 
 Toda mudança de status é registrada como uma **interação**, que fica salva no histórico do cliente.
 
@@ -288,6 +299,16 @@ No painel do Supabase, vá em **SQL Editor** e execute, nesta ordem:
 supabase/schema.sql
 supabase/rls.sql
 ```
+
+Se o banco **já existia** antes desta versão, rode também:
+
+```
+supabase/migration-01-ciclo-operacional.sql
+```
+
+Ele adiciona `silenciado_ate` e `resolvido_em` em `titulos` — colunas que o `schema.sql` não cria
+em bancos existentes (ele usa `create table if not exists`). Sem elas, o card "Recuperado" mostra
+"—" e registrar o resultado de um título falha com erro explícito.
 
 O `schema.sql` cria as três tabelas (`clientes`, `titulos`, `interacoes`) e os índices necessários. O `rls.sql` habilita Row Level Security nelas — **passo obrigatório**, sem ele os dados ficam acessíveis por qualquer pessoa que tenha a URL do projeto e a chave anônima (que ficam visíveis no navegador por design do Supabase).
 

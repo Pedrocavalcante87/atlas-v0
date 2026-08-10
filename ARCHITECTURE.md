@@ -1,5 +1,10 @@
 # Atlas — Arquitetura
 
+> ⚠️ **Escopo deste documento**: ele descreve o estado da branch de trabalho atual, que pode estar
+> à frente da `main`. Confira `git log --oneline main..HEAD` antes de assumir que o que está aqui
+> já está mergeado. Uma auditoria encontrou afirmações deste arquivo que haviam ficado falsas —
+> tratar documentação desatualizada como bug, não como tarefa cosmética.
+>
 > Este documento descreve a arquitetura **real e atual** do projeto, como implementada no código.
 > Não é uma arquitetura alvo/idealizada — onde o sistema tem inconsistências, duplicações ou
 > soluções ad-hoc, isso está registrado aqui de propósito, para que qualquer pessoa que mexer
@@ -47,9 +52,13 @@ schema exige localizar todos os pontos de chamada manualmente (ver §7).
 
 Os módulos com limite de domínio bem definido e sem acesso direto ao banco são **priorização**
 (`lib/prioridade.ts` + `lib/templates.ts`), **ingestão de CSV** (`lib/csv-import.ts`) e
-**formatação** (`lib/format.ts`): recebem dados já carregados e devolvem dados derivados, sem I/O
-— e por isso são os únicos com testes automatizados (`*.test.ts` ao lado de cada um). Todos os
-outros módulos misturam apresentação, orquestração e acesso a dados no mesmo arquivo.
+**formatação** (`lib/format.ts`): recebem dados já carregados e devolvem dados derivados, sem I/O.
+`lib/recuperacao.ts` é misto de propósito — a apuração (`somarRecuperado`,
+`inicioJanelaRecuperacao`) é pura e testada; só `totalRecuperado` toca o banco, e é fino.
+
+**Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`.
+`lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota, Server Action ou componente
+React tem cobertura — a verificação deles é manual (`npm run dev`) ou via E2E ad-hoc.
 
 ---
 
@@ -78,7 +87,7 @@ proxy.ts — isolado, não depende de nenhum módulo de domínio
 
 Pontos a notar:
 
-- **`lib/supabase.ts` é o único nó compartilhado por quase todo o sistema** — 7+ arquivos o
+- **`lib/supabase.ts` é o único nó compartilhado por quase todo o sistema** — 6 arquivos o
   importam diretamente. Não existe indireção entre eles.
 - **`lib/prioridade.ts` agora é usado pela Lista do Dia E por `/api/dados`** (para "valor
   vencido"). O histórico do cliente (`clientes/[id]/page.tsx`) continua sem usá-lo — por design,
@@ -99,8 +108,9 @@ Pontos a notar:
 ### 4.1 Lista do dia (leitura + mutação)
 
 ```
-Supabase: titulos JOIN clientes (status = aberto)
-   → priorizarTitulos()      [lib/prioridade.ts — calcula score, categoria, dias, mensagem]
+Supabase: titulos JOIN clientes (status != pago)   ← o domínio é quem filtra a fila
+   → priorizarTitulos()      [lib/prioridade.ts — estaNaFilaHoje decide quem entra;
+                              calcula score, categoria, dias, mensagem, motivoReentrada]
    → agruparPorCliente()     [lib/prioridade.ts — agrupa por cliente_id, mensagem consolidada]
    → HomePage (Server Component)
    → ClienteCard / TituloCard (Client Components)
@@ -131,8 +141,13 @@ Passo 2 — confirmação (grava no banco):
     → responde JSON com relatório final
 ```
 
-O dado que será persistido sai do servidor (passo 1), passa pelo browser, e volta ao servidor
-(passo 2) sem revalidação de formato/negócio no passo 2 além de "é um array não vazio" — ver §8.
+O dado que será persistido sai do servidor (passo 1), passa pelo browser e volta ao servidor
+(passo 2) — por isso **não é confiável**. Os dois passos aplicam a mesma
+`lib/csv-import.ts::validarLinhaRecebida`: o passo 1 como portão final antes de prometer ao
+usuário "N títulos prontos", o passo 2 como borda de confiança antes de gravar. Chamar a mesma
+função nos dois lugares garante por construção que a prévia nunca aprove uma linha que a gravação
+recuse — antes cada lado tinha regras próprias (telefone `>= 8` dígitos vs. `10-15`) e a diferença
+virava descarte silencioso na hora de gravar.
 
 ### 4.3 Histórico do cliente (somente leitura)
 
@@ -171,8 +186,30 @@ de Server Component + Server Action.
 | Formatação de moeda | `lib/format.ts::formatarMoeda` | Centralizado — antes reimplementado em 6 arquivos |
 | Autenticação | `proxy.ts` + `api/login/route.ts` | Rate limiting em memória + comparação constant-time |
 
-A regra de negócio mais importante do sistema (o que é "urgente") agora tem uma única
-implementação, reaproveitada em todos os pontos que precisam dela.
+A regra de negócio mais importante do sistema (o que é "urgente") tem uma única implementação,
+reaproveitada em todos os pontos que precisam dela — inclusive `TituloCard.tsx`, que usa
+`titulo.categoria` em vez de re-derivar os cortes (durante um período ele reimplementava `> 7` /
+`>= 1 && <= 7` por conta própria, apesar deste documento afirmar o contrário).
+
+### Ciclo de vida do título (regra central, adicionada no ciclo "ciclo operacional")
+
+**Só `pago` é terminal.** `promessa` e `sem_resposta` tiram o título da fila temporariamente:
+
+| Status | Sai da fila? | Volta quando |
+|---|---|---|
+| `aberto` | não, se urgente | — |
+| `promessa` | até `data_promessa` | a data prometida chega |
+| `sem_resposta` | até `silenciado_ate` | o silêncio expira (`DIAS_SILENCIO_SEM_RESPOSTA`) |
+| `pago` | permanentemente | nunca |
+
+Quem decide é `lib/prioridade.ts::estaNaFilaHoje`, avaliado **na leitura** — não existe cron,
+worker ou fila. A home busca `.neq('status','pago')` e o domínio filtra. Um título que reentra
+entra mesmo com vencimento distante: o compromisso assumido vence o corte de "ainda não é urgente".
+
+**Consequência que já quebrou código**: "concluído" deixou de ser `status != 'aberto'`. Toda query
+que significa "ainda devido" usa `status != 'pago'`. O `DELETE ?modo=concluidos` apagava
+`.neq('status','aberto')` — o que passaria a destruir títulos em follow-up junto com o histórico
+deles.
 
 ---
 
@@ -211,7 +248,7 @@ implementação, reaproveitada em todos os pontos que precisam dela.
 
 ## 7. Pontos de acoplamento
 
-- **Acoplamento direto ao Supabase em 7+ arquivos** — nomes de tabela e coluna como strings soltas
+- **Acoplamento direto ao Supabase em 6 arquivos** — nomes de tabela e coluna como strings soltas
   espalhadas pelo código (`.from('titulos')`, `.eq('status', 'aberto')`, etc.), sem abstração
   intermediária.
 - **UI acoplada ao shape das respostas de API por convenção, não por tipo compartilhado** —

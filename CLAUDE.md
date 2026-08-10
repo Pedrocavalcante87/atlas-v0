@@ -40,9 +40,9 @@ precisa antes de tocar em qualquer coisa.
 9. **Segurança é requisito**, não opcional, em tudo que toca autenticação, o cookie de sessão,
    Supabase (service_role vs anon), dados de cliente/telefone, ou as rotas de importação/exclusão
    de dados. Nunca exponha secrets (ver `.env.local`, nunca commitado — está no `.gitignore`).
-10. **Teste o que alterar.** Não há suíte automatizada neste projeto (ver §Testes abaixo) — rode ao
-    menos `npm run lint` e `npx tsc --noEmit`, e valide o fluxo manualmente via `npm run dev`
-    quando a mudança afetar UI ou dado.
+10. **Teste o que alterar.** Existe suíte automatizada, mas ela cobre só o domínio sem I/O (ver
+    §Comandos) — rode `npm run test`, `npm run lint` e `npx tsc --noEmit`, e valide o fluxo
+    manualmente via `npm run dev` quando a mudança afetar UI, rota ou dado, que não têm cobertura.
 11. **Revise criticamente depois de implementar.** Procure bug, regressão, edge case, duplicação
     nova, complexidade desnecessária e problema de segurança antes de considerar concluído.
 12. **Respeite o escopo.** Implemente o que foi pedido. Se achar problema não relacionado,
@@ -97,7 +97,7 @@ novo.
 - **Nunca faça commit sem pedido explícito do usuário** (regra já existente, mantida).
 - **Antes de sugerir ou abrir um merge para `main`**, rode as verificações que existem hoje no
   projeto — `npm run lint`, `npx tsc --noEmit` — e valide manualmente via `npm run dev` quando a
-  mudança afeta UI ou dado (não há suíte automatizada, ver §Comandos). Reporte o resultado dessas
+  mudança afeta UI ou dado (a suíte cobre só o domínio, ver §Comandos). Reporte o resultado dessas
   checagens ao usuário antes do merge, não depois.
 - **Nunca faça merge para `main`, nem push de nenhuma branch para `origin` (incluindo branches de
   feature/fix/refactor/hotfix), sem autorização explícita do usuário para aquela ação específica** —
@@ -221,13 +221,20 @@ real do projeto — seguir o mesmo padrão em código novo é consistente com o 
 
 ## Particularidades de domínio que já são "regra", não sugestão
 
+- **Ciclo de vida do título — só `pago` é terminal.** `promessa` e `sem_resposta` tiram o título
+  da fila **temporariamente**: ele volta quando `data_promessa` chega ou quando `silenciado_ate`
+  expira (`DIAS_SILENCIO_SEM_RESPOSTA`, constante em `lib/prioridade.ts`). Quem decide é
+  `lib/prioridade.ts::estaNaFilaHoje`, na **leitura** — não há cron/worker. Consequência que já
+  causou bug: "concluído" **não** é `status != 'aberto'`; qualquer query que precise de "ainda
+  devido" usa `status != 'pago'`. Nunca reintroduza `.neq('status','aberto')` numa exclusão.
 - **Categorização de urgência**: `> 7 dias` de atraso = `atraso_longo`; `1–7 dias` =
   `atraso_leve`; vence hoje até `+3 dias` = `preventivo`; vencimento `> 3 dias` no futuro **não
-  aparece** na lista do dia. Fonte oficial: `lib/prioridade.ts::categorizarTitulo`. Esse mesmo
-  corte está reimplementado de forma independente em `api/upload-csv/route.ts` (breakdown da
-  prévia) e em `api/dados/route.ts` (com lógica de data diferente, comparação de string) — ver
-  ARCHITECTURE.md §6. Ao mudar o corte de dias, os três lugares precisam ser atualizados
-  manualmente; não há teste que pegue o esquecimento.
+  aparece** na lista do dia. Fonte oficial e única: `lib/prioridade.ts::categorizarTitulo`,
+  reaproveitada por `api/upload-csv/route.ts`, `api/dados/route.ts` e `TituloCard.tsx` (que usa
+  `titulo.categoria`, não recalcula). Coberto por teste.
+- **Exceção deliberada ao corte de urgência**: um título que reentra por promessa vencida ou fim
+  do silêncio entra na fila **mesmo com vencimento distante** — o compromisso com o cliente vence
+  o "ainda não é urgente".
 - **Score de priorização** = `dias_em_atraso × valor`, maior primeiro. Só se aplica a vencidos;
   preventivos ordenam por vencimento mais próximo.
 - **Cobrança é por cliente, não por título**: um cliente com vários títulos em aberto recebe uma
@@ -238,17 +245,27 @@ real do projeto — seguir o mesmo padrão em código novo é consistente com o 
   silenciosamente sob o mesmo registro — comportamento atual, não validado contra esse caso.
 - **Importação de CSV é sempre em duas chamadas**: `POST /api/upload-csv` só valida e retorna
   prévia (nada é gravado); `POST /api/upload-csv/confirmar` recebe de volta as linhas que o
-  próprio browser guardou da prévia e só então grava. A rota de confirmação **não revalida** os
-  dados recebidos além de checar se é um array não vazio — ver nota de segurança abaixo.
+  próprio browser guardou da prévia e só então grava. As duas passam pela **mesma**
+  `lib/csv-import.ts::validarLinhaRecebida` — paridade por construção. Se mudar a regra de uma
+  linha válida, mude só lá.
 - **Status de título**: `aberto | pago | promessa | sem_resposta` (CHECK constraint no banco,
-  `supabase/schema.sql`). Toda mudança de status gera/atualiza uma linha em `interacoes`.
+  `supabase/schema.sql`). Toda mudança de status gera/atualiza uma linha em `interacoes` e
+  reescreve `data_promessa`/`silenciado_ate`/`resolvido_em` juntos (`actions/index.ts`), para não
+  sobrar estado de uma marcação anterior.
+- **`resolvido_em` é a fonte de verdade da receita recuperada** (`lib/recuperacao.ts`). Não usar
+  `interacoes.data_envio` para isso: ela marca o envio da mensagem, não a confirmação do
+  pagamento.
 
 ---
 
 ## Banco de dados / Supabase
 
 - Ordem de execução obrigatória no SQL Editor do Supabase: `supabase/schema.sql` **depois**
-  `supabase/rls.sql`.
+  `supabase/rls.sql`. Em banco que **já existe**, rodar também
+  `supabase/migration-01-ciclo-operacional.sql` (as colunas `silenciado_ate`/`resolvido_em` não
+  chegam por `schema.sql`, que usa `create table if not exists`). Sem essa migration a apuração
+  de recuperado devolve `null` (a UI mostra "—") e registrar resultado de título falha com erro
+  explícito — por design, nada de número falso.
 - RLS está habilitado nas 3 tabelas **sem nenhuma política** — isso bloqueia totalmente a chave
   anônima (exposta no browser por design do Supabase). Todo acesso do app passa pela
   `SUPABASE_SERVICE_ROLE_KEY`, usada só em `lib/supabase.ts`, só no servidor. **Não crie política
