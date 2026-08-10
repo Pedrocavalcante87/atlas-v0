@@ -12,6 +12,9 @@ interface Stats {
   interacoes: number;
   valorVencido: number;
   valorAberto: number;
+  /** null quando a apuração falha — nunca exibir como zero (ver lib/recuperacao.ts). */
+  valorRecuperado: number | null;
+  janelaRecuperacaoDias: number;
 }
 
 export default function DadosPage() {
@@ -80,7 +83,7 @@ export default function DadosPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
         {loadingStats ? (
-          Array.from({ length: 6 }).map((_, i) => (
+          Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm animate-pulse">
               <div className="h-3 bg-slate-100 rounded w-2/3 mb-2" />
               <div className="h-6 bg-slate-100 rounded w-1/2" />
@@ -89,8 +92,17 @@ export default function DadosPage() {
         ) : stats ? (
           <>
             <StatCard label="Clientes" value={stats.clientes} />
-            <StatCard label="Títulos abertos" value={stats.titulosAbertos} highlight="blue" />
-            <StatCard label="Títulos concluídos" value={stats.titulosConcluidos} />
+            <StatCard
+              label="Títulos em aberto"
+              value={stats.titulosAbertos}
+              highlight="blue"
+              hint="Tudo que ainda não foi pago, incluindo follow-ups"
+            />
+            <StatCard
+              label="Títulos pagos"
+              value={stats.titulosConcluidos}
+              hint="Único estado que encerra um título"
+            />
             <StatCard label="Total de títulos" value={stats.titulos} />
             {/* Valor vencido = mesma lógica da lista do dia (diasAtraso > 0) */}
             <StatCard
@@ -104,6 +116,15 @@ export default function DadosPage() {
               label="Total em aberto"
               value={formatarMoeda(stats.valorAberto)}
               hint="Inclui vencidos + títulos que ainda vão vencer"
+            />
+            <StatCard
+              label="Recuperado"
+              value={stats.valorRecuperado === null ? '—' : formatarMoeda(stats.valorRecuperado)}
+              hint={
+                stats.valorRecuperado === null
+                  ? 'Apuração indisponível — confira o log do servidor'
+                  : `Títulos pagos nos últimos ${stats.janelaRecuperacaoDias} dias`
+              }
             />
           </>
         ) : (
@@ -128,9 +149,9 @@ export default function DadosPage() {
 
         <div className="divide-y divide-slate-100">
           <AcaoPerigo
-            titulo="Limpar títulos concluídos"
-            descricao="Remove títulos marcados como pago, prometeu pagar ou sem resposta. Clientes e títulos em aberto são mantidos."
-            labelBotao="Limpar concluídos"
+            titulo="Limpar títulos pagos"
+            descricao="Remove apenas títulos já pagos, com o histórico de interações deles. Títulos aguardando follow-up (promessa ou sem resposta) são mantidos — continuam sendo dívida em aberto."
+            labelBotao="Limpar pagos"
             cor="amber"
             confirmando={confirmacao === 'concluidos'}
             deletando={deletando}
