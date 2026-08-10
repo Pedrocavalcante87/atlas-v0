@@ -332,6 +332,7 @@ Acesse [http://localhost:3000](http://localhost:3000).
 npm run build   # gera build de produção
 npm run start   # serve o build de produção
 npm run lint    # verifica o código com ESLint
+npm run test    # roda os testes automatizados (vitest)
 ```
 
 ---
