@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Interacao } from '@/types';
+import { formatarMoeda } from '@/lib/format';
 
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';
@@ -25,10 +26,6 @@ function StatusBadge({ status }: { status: string }) {
       {cfg.label}
     </span>
   );
-}
-
-function formatarMoeda(valor: number) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 function formatarData(iso: string) {

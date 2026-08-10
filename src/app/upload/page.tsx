@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { formatarMoeda as moeda } from '@/lib/format';
 
 interface BreakdownGroup {
   count: number;
@@ -62,10 +63,6 @@ function analisarCSVLocal(text: string): FilePreview {
     : 'virgula (,)';
   const linhas = Math.max(0, text.trim().split('\n').filter((l) => l.trim()).length - 1);
   return { linhas, separador };
-}
-
-function moeda(v: number) {
-  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 export default function UploadPage() {

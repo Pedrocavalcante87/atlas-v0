@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
 import { supabase } from '@/lib/supabase';
+import { calcularDiasAtraso, categorizarTitulo } from '@/lib/prioridade';
+import {
+  COLUMN_ALIASES,
+  detectarMapeamentoColunas,
+  normalizarValor,
+  normalizarData,
+  limparTelefone,
+  dataEmFaixaRazoavel,
+} from '@/lib/csv-import';
 
 // ---------------------------------------------------------------------------
 // Esta rota é SOMENTE PRÉVIA — faz o parsing, a validação e checa duplicatas
@@ -8,126 +17,14 @@ import { supabase } from '@/lib/supabase';
 // /api/upload-csv/confirmar, chamada depois que o usuário revisa o relatório
 // e clica em "Confirmar importação". Isso evita subir uma planilha errada
 // (data trocada, coluna mapeada errado) direto pro banco sem chance de revisar.
+//
+// Reconhecimento de coluna, normalização de valor/data/telefone e o corte de
+// urgência vivem em lib/csv-import.ts e lib/prioridade.ts — reaproveitados
+// aqui e em confirmar/route.ts, em vez de reimplementados (ver ARCHITECTURE.md
+// §6, duplicações agora resolvidas).
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Mapa de aliases — colunas conhecidas de diferentes sistemas (ERP, planilhas)
-// ---------------------------------------------------------------------------
-const COLUMN_ALIASES: Record<string, string[]> = {
-  nome: [
-    'nome', 'name', 'cliente', 'nome_cliente', 'razao_social', 'devedor',
-    'sacado', 'nominativo', 'credor', 'beneficiario', 'pagador', 'empresa',
-    'cliente_nome', 'nome_devedor', 'nome_sacado', 'titular', 'contratante',
-  ],
-  telefone: [
-    'telefone', 'phone', 'celular', 'fone', 'tel', 'whatsapp', 'contato',
-    'numero', 'telefone_celular', 'tel_celular', 'mobile', 'telefone_whatsapp',
-    'cel', 'nr_celular', 'telefone1', 'fone1', 'tel1',
-  ],
-  valor: [
-    'valor', 'value', 'montante', 'vl_titulo', 'vl_documento', 'saldo',
-    'total', 'vlr', 'valor_total', 'valor_nominal', 'valor_cobrado',
-    'vl_total', 'amount', 'saldo_devedor', 'vl_original', 'vl_saldo',
-    'valor_aberto', 'vl_aberto', 'valor_due', 'vl_vencido',
-  ],
-  data_vencimento: [
-    'data_vencimento', 'vencimento', 'due_date', 'dt_vencimento', 'data',
-    'prazo', 'venc', 'data_venc', 'dt_venc', 'validade', 'data_limite',
-    'expiry', 'expiration', 'dt_vencto', 'vencto', 'data_vencto',
-    'dt_venc_titulo', 'data_vencimento_titulo', 'vencimento_titulo',
-  ],
-};
-
-function normalizarHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/[\s\-\.\/]+/g, '_');
-}
-
-function detectarMapeamentoColunas(
-  headers: string[],
-): { mapping: Record<string, string | null>; headerNorm: string[] } {
-  const headerNorm = headers.map(normalizarHeader);
-  const mapping: Record<string, string | null> = {
-    nome: null,
-    telefone: null,
-    valor: null,
-    data_vencimento: null,
-  };
-
-  for (const canonical of Object.keys(mapping)) {
-    for (const alias of COLUMN_ALIASES[canonical]) {
-      const idx = headerNorm.findIndex((h) => h === alias);
-      if (idx !== -1) {
-        mapping[canonical] = headers[idx];
-        break;
-      }
-    }
-  }
-
-  return { mapping, headerNorm };
-}
-
-function normalizarValor(raw: string): number {
-  let s = raw.trim().replace(/^R\$\s*/, '').replace(/^\$\s*/, '').trim();
-
-  const temPonto = s.includes('.');
-  const temVirgula = s.includes(',');
-
-  if (temPonto && temVirgula) {
-    const ultimoPonto  = s.lastIndexOf('.');
-    const ultimaVirgula = s.lastIndexOf(',');
-    if (ultimaVirgula > ultimoPonto) {
-      s = s.replace(/\./g, '').replace(',', '.');
-    } else {
-      s = s.replace(/,/g, '');
-    }
-  } else if (temVirgula) {
-    const posVirgula = s.lastIndexOf(',');
-    const aposVirgula = s.slice(posVirgula + 1);
-    if (aposVirgula.length <= 2) {
-      s = s.replace(',', '.');
-    } else {
-      s = s.replace(/,/g, '');
-    }
-  }
-
-  return parseFloat(s);
-}
-
-function normalizarData(raw: string): string | null {
-  const s = raw.trim();
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
-    const [d, m, y] = s.split('/');
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-
-  if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) {
-    const [d, m, y] = s.split('-');
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-
-  if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(s)) {
-    const [d, m, y] = s.split('.');
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-
-  if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) {
-    return s.replace(/\//g, '-');
-  }
-
-  if (/^\d{8}$/.test(s)) {
-    return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
-  }
-
-  return null;
-}
-
-function limparTelefone(tel: string): string {
-  const digits = tel.replace(/\D/g, '');
-  return digits.startsWith('55') ? digits : `55${digits}`;
-}
+const MAX_LINHAS = 20_000; // teto de sanidade para um upload de planilha de PME
 
 // ---------------------------------------------------------------------------
 // Route handler — PRÉVIA (leitura apenas, nada é gravado aqui)
@@ -157,6 +54,13 @@ export async function POST(request: NextRequest) {
 
   if (rows.length === 0) {
     return NextResponse.json({ error: 'O arquivo CSV está vazio.' }, { status: 400 });
+  }
+
+  if (rows.length > MAX_LINHAS) {
+    return NextResponse.json(
+      { error: `Arquivo com ${rows.length} linhas excede o limite de ${MAX_LINHAS} por importação. Divida em arquivos menores.` },
+      { status: 400 },
+    );
   }
 
   const headers = Object.keys(rows[0]);
@@ -230,6 +134,15 @@ export async function POST(request: NextRequest) {
       );
       continue;
     }
+    if (!dataEmFaixaRazoavel(dataVencimento)) {
+      linhasIgnoradas.push({
+        linha,
+        nome,
+        motivo: `Data fora da faixa esperada — "${dataRaw}" (mais de 5 anos no passado ou no futuro; confira se a coluna certa foi mapeada)`,
+      });
+      importErrors.push(`Linha ${linha}: data fora da faixa esperada — "${dataRaw}".`);
+      continue;
+    }
 
     linhasValidas.push({ linha, nome, telefone, valor, dataVencimento });
   }
@@ -275,8 +188,9 @@ export async function POST(request: NextRequest) {
   }
 
   // ---- Breakdown financeiro pra exibir na prévia ----
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
+  // Mesmo corte de urgência usado na lista do dia (lib/prioridade.ts) — antes
+  // esse loop reimplementava a conta de "dias de atraso" por conta própria e
+  // podia divergir do resto do sistema (ver ARCHITECTURE.md §6).
   const breakdown = {
     vencidos: { count: 0, valor: 0 },
     preventivos: { count: 0, valor: 0 },
@@ -284,13 +198,12 @@ export async function POST(request: NextRequest) {
   };
 
   for (const l of linhasParaImportar) {
-    const venc = new Date(`${l.dataVencimento}T12:00:00`);
-    venc.setHours(0, 0, 0, 0);
-    const dias = Math.round((hoje.getTime() - venc.getTime()) / (1000 * 60 * 60 * 24));
-    if (dias > 0) {
+    const diasAtraso = calcularDiasAtraso(l.dataVencimento);
+    const categoria = categorizarTitulo(diasAtraso);
+    if (categoria === 'atraso_longo' || categoria === 'atraso_leve') {
       breakdown.vencidos.count++;
       breakdown.vencidos.valor += l.valor;
-    } else if (dias >= -3) {
+    } else if (categoria === 'preventivo') {
       breakdown.preventivos.count++;
       breakdown.preventivos.valor += l.valor;
     } else {
