@@ -86,7 +86,7 @@ export default function ClienteCard({ grupo }: Props) {
 
         <div className="space-y-1.5">
           {titulos.map((t) => (
-            <TituloCard key={t.id} titulo={t} compact />
+            <TituloCard key={t.id} titulo={t} />
           ))}
         </div>
       </div>
