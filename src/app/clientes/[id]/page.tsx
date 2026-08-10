@@ -49,8 +49,11 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
     .eq('cliente_id', id)
     .order('data_vencimento', { ascending: false });
 
+  // "Em aberto" = tudo que ainda não foi pago. Filtrar por status === 'aberto'
+  // deixaria de fora títulos em 'promessa' e 'sem_resposta', que continuam
+  // sendo dívida — o cliente veria um total menor do que realmente deve.
   const totalAberto = (titulos ?? [])
-    .filter((t) => t.status === 'aberto')
+    .filter((t) => t.status !== 'pago')
     .reduce((sum: number, t: { valor: number }) => sum + t.valor, 0);
 
   const totalPago = (titulos ?? [])
