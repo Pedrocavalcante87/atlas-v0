@@ -5,8 +5,20 @@ const PUBLIC_PATHS = ['/login', '/api/login'];
 export function proxy(request: NextRequest) {
   const appPassword = process.env.APP_PASSWORD;
 
-  // Sem senha configurada → acesso livre (desenvolvimento local)
-  if (!appPassword) return NextResponse.next();
+  if (!appPassword) {
+    // Em desenvolvimento, rodar sem senha é conveniente e o risco é local.
+    // Em produção isso deixaria TODAS as rotas abertas — incluindo as que
+    // apagam dados e as que expõem nome/telefone/valores de clientes. Falhar
+    // fechado e alto é melhor do que servir os dados de graça por descuido de
+    // configuração.
+    if (process.env.NODE_ENV === 'production') {
+      return new NextResponse(
+        'Atlas não está configurado: defina APP_PASSWORD nas variáveis de ambiente.',
+        { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } },
+      );
+    }
+    return NextResponse.next();
+  }
 
   const { pathname } = request.nextUrl;
 
