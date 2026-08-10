@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { calcularDiasAtraso } from '@/lib/prioridade';
 
 export async function GET() {
   const [
@@ -18,11 +19,14 @@ export async function GET() {
     supabase.from('titulos').select('*', { count: 'exact', head: true }).neq('status', 'aberto'),
   ]);
 
-  // Mesma lógica da página principal: só títulos já vencidos contam como "em risco"
-  const hoje = new Date().toISOString().split('T')[0];
+  // Mesma lógica da lista do dia (lib/prioridade.ts::calcularDiasAtraso) — só
+  // títulos já vencidos contam como "em risco". Antes esse cálculo comparava
+  // strings ISO de data diretamente em vez de reaproveitar a fonte oficial de
+  // "dias de atraso" (ver ARCHITECTURE.md §6); reaproveitar evita que os dois
+  // números divirjam se a regra mudar em só um dos lugares.
   const lista = abertos ?? [];
-  const valorVencido  = lista
-    .filter((t) => (t.data_vencimento as string) < hoje)
+  const valorVencido = lista
+    .filter((t) => calcularDiasAtraso(t.data_vencimento as string) > 0)
     .reduce((sum, t) => sum + (t.valor as number), 0);
   const valorAberto = lista.reduce((sum, t) => sum + (t.valor as number), 0);
 
@@ -37,11 +41,28 @@ export async function GET() {
   });
 }
 
+// A UI já pede confirmação em dois cliques antes de chamar esse endpoint,
+// mas isso não protege contra alguém disparando o DELETE diretamente (fora
+// da UI) com uma sessão válida — a única checagem que existia antes era a
+// senha do app. Para a ação mais destrutiva ("tudo"), exigimos que o corpo
+// da requisição inclua a frase exata que a UI pede pro usuário digitar; isso
+// eleva a barra de "clique duplo" pra "precisa saber o contrato exato", o
+// suficiente pra esse estágio do produto sem virar um fluxo de confirmação
+// complexo (ver ARCHITECTURE.md §9).
+const FRASE_CONFIRMACAO_TUDO = 'EXCLUIR TUDO';
+
 export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const modo = searchParams.get('modo');
+  const body = await request.json().catch(() => null);
 
   if (modo === 'tudo') {
+    if (body?.confirmacao !== FRASE_CONFIRMACAO_TUDO) {
+      return NextResponse.json(
+        { error: `Confirmação inválida. Envie { confirmacao: "${FRASE_CONFIRMACAO_TUDO}" } no corpo da requisição.` },
+        { status: 400 },
+      );
+    }
     await supabase.from('interacoes').delete().not('id', 'is', null);
     await supabase.from('titulos').delete().not('id', 'is', null);
     await supabase.from('clientes').delete().not('id', 'is', null);

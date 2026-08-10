@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { formatarMoeda } from '@/lib/format';
 
 interface Stats {
   clientes: number;
@@ -13,10 +14,6 @@ interface Stats {
   valorAberto: number;
 }
 
-function formatarMoeda(v: number) {
-  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
 export default function DadosPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
@@ -24,8 +21,12 @@ export default function DadosPage() {
   const [deletando, setDeletando] = useState(false);
   const [mensagem, setMensagem] = useState('');
 
+  // Não seta loadingStats(true) aqui — o estado inicial já é `true` (skeleton
+  // aparece no primeiro render) e chamar setState de forma síncrona dentro do
+  // efeito de montagem dispara re-render em cascata. Quem precisa mostrar o
+  // skeleton de novo depois de montado (recarregar após limpar dados) seta
+  // explicitamente antes de chamar esta função — ver `limpar()` abaixo.
   const carregarStats = useCallback(async () => {
-    setLoadingStats(true);
     const res = await fetch('/api/dados', { cache: 'no-store' });
     const data = await res.json();
     setStats(data);
@@ -33,17 +34,34 @@ export default function DadosPage() {
   }, []);
 
   useEffect(() => {
+    // Fetch-on-mount intencional (única tela do app que é Client Component +
+    // fetch a uma API Route — ver ARCHITECTURE.md §4.4). A regra experimental
+    // react-hooks/set-state-in-effect prefere padrões de fetch baseados em
+    // Suspense/bibliotecas dedicadas; migrar isso é uma mudança de padrão de
+    // dados maior do que o escopo desta tela justifica hoje.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     carregarStats();
   }, [carregarStats]);
 
   async function limpar(modo: 'tudo' | 'concluidos') {
     setDeletando(true);
-    const res = await fetch(`/api/dados?modo=${modo}`, { method: 'DELETE' });
-    const data = await res.json();
-    setMensagem(data.mensagem ?? 'Dados removidos.');
+    setMensagem('');
+    const res = await fetch(`/api/dados?modo=${modo}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      // "tudo" exige a frase exata que o servidor valida — ver api/dados/route.ts.
+      body: JSON.stringify(modo === 'tudo' ? { confirmacao: 'EXCLUIR TUDO' } : {}),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      setMensagem(data?.error ?? 'Erro ao remover dados.');
+    } else {
+      setMensagem(data.mensagem ?? 'Dados removidos.');
+      setLoadingStats(true);
+      await carregarStats();
+    }
     setConfirmacao(null);
     setDeletando(false);
-    await carregarStats();
   }
 
   return (
