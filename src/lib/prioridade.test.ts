@@ -4,6 +4,9 @@ import {
   categorizarTitulo,
   priorizarTitulos,
   agruparPorCliente,
+  estaNaFilaHoje,
+  calcularSilenciadoAte,
+  DIAS_SILENCIO_SEM_RESPOSTA,
 } from './prioridade';
 import type { Titulo, Cliente, TituloComPrioridade } from '@/types';
 
@@ -67,16 +70,145 @@ function titulo(overrides: Partial<Titulo> = {}): Titulo & { clientes: Cliente }
     data_vencimento: isoOffset(-1),
     status: 'aberto',
     data_promessa: null,
+    silenciado_ate: null,
+    resolvido_em: null,
     criado_em: '',
     clientes: cliente,
     ...overrides,
   };
 }
 
+// ---------------------------------------------------------------------------
+// Ciclo de vida do título — a regra central do produto: só 'pago' é terminal.
+// Antes disso, marcar "sem resposta" ou "prometeu pagar" removia a dívida da
+// operação para sempre, escondendo dinheiro que continuava devido.
+// ---------------------------------------------------------------------------
+describe('estaNaFilaHoje', () => {
+  const base = { data_vencimento: isoOffset(-5), data_promessa: null, silenciado_ate: null };
+
+  it('título pago nunca volta para a fila', () => {
+    expect(estaNaFilaHoje({ ...base, status: 'pago' })).toBe(false);
+    // nem mesmo se estiver vencido há muito tempo
+    expect(
+      estaNaFilaHoje({ ...base, status: 'pago', data_vencimento: isoOffset(-500) }),
+    ).toBe(false);
+  });
+
+  it('título aberto e urgente entra na fila', () => {
+    expect(estaNaFilaHoje({ ...base, status: 'aberto' })).toBe(true);
+  });
+
+  it('título aberto com vencimento distante ainda não entra', () => {
+    expect(
+      estaNaFilaHoje({ ...base, status: 'aberto', data_vencimento: isoOffset(30) }),
+    ).toBe(false);
+  });
+
+  describe('promessa de pagamento', () => {
+    it('fica fora da fila enquanto a data prometida não chega', () => {
+      expect(
+        estaNaFilaHoje({ ...base, status: 'promessa', data_promessa: isoOffset(1) }),
+      ).toBe(false);
+    });
+
+    it('volta para a fila no dia prometido', () => {
+      expect(
+        estaNaFilaHoje({ ...base, status: 'promessa', data_promessa: isoOffset(0) }),
+      ).toBe(true);
+    });
+
+    it('volta para a fila se a data prometida já passou', () => {
+      expect(
+        estaNaFilaHoje({ ...base, status: 'promessa', data_promessa: isoOffset(-1) }),
+      ).toBe(true);
+    });
+
+    it('volta para a fila se a promessa ficou sem data (não pode sumir)', () => {
+      expect(
+        estaNaFilaHoje({ ...base, status: 'promessa', data_promessa: null }),
+      ).toBe(true);
+    });
+  });
+
+  describe('sem resposta', () => {
+    it('sai da fila durante o silêncio', () => {
+      expect(
+        estaNaFilaHoje({ ...base, status: 'sem_resposta', silenciado_ate: isoOffset(1) }),
+      ).toBe(false);
+    });
+
+    it('volta para a fila quando o silêncio expira', () => {
+      expect(
+        estaNaFilaHoje({ ...base, status: 'sem_resposta', silenciado_ate: isoOffset(0) }),
+      ).toBe(true);
+      expect(
+        estaNaFilaHoje({ ...base, status: 'sem_resposta', silenciado_ate: isoOffset(-1) }),
+      ).toBe(true);
+    });
+
+    it('volta para a fila se ficou sem data de silêncio (linhas antigas)', () => {
+      expect(
+        estaNaFilaHoje({ ...base, status: 'sem_resposta', silenciado_ate: null }),
+      ).toBe(true);
+    });
+
+    it('o silêncio dura exatamente DIAS_SILENCIO_SEM_RESPOSTA dias', () => {
+      const ate = calcularSilenciadoAte();
+      // No dia anterior ao fim do silêncio ainda está fora; no dia, volta.
+      expect(calcularDiasAtraso(ate)).toBe(-DIAS_SILENCIO_SEM_RESPOSTA);
+      expect(estaNaFilaHoje({ ...base, status: 'sem_resposta', silenciado_ate: ate })).toBe(false);
+    });
+  });
+});
+
 describe('priorizarTitulos', () => {
   it('ignora títulos que não estão abertos', () => {
     const resultado = priorizarTitulos([titulo({ id: 't1', status: 'pago' })]);
     expect(resultado).toHaveLength(0);
+  });
+
+  it('traz de volta um título cuja promessa venceu, marcando o motivo', () => {
+    const resultado = priorizarTitulos([
+      titulo({ id: 't1', status: 'promessa', data_promessa: isoOffset(-1) }),
+    ]);
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].motivoReentrada).toBe('promessa_vencida');
+  });
+
+  it('traz de volta um título cujo silêncio expirou, marcando o motivo', () => {
+    const resultado = priorizarTitulos([
+      titulo({ id: 't1', status: 'sem_resposta', silenciado_ate: isoOffset(-1) }),
+    ]);
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].motivoReentrada).toBe('silencio_expirado');
+  });
+
+  it('não traz títulos ainda em silêncio nem promessas futuras', () => {
+    const resultado = priorizarTitulos([
+      titulo({ id: 't1', status: 'sem_resposta', silenciado_ate: isoOffset(2) }),
+      titulo({ id: 't2', status: 'promessa', data_promessa: isoOffset(2) }),
+    ]);
+    expect(resultado).toHaveLength(0);
+  });
+
+  it('título em fila normal não tem motivo de reentrada', () => {
+    const resultado = priorizarTitulos([titulo({ id: 't1' })]);
+    expect(resultado[0].motivoReentrada).toBeNull();
+  });
+
+  it('reentrada vence o corte de urgência: promessa vencida volta mesmo com vencimento distante', () => {
+    // Cliente prometeu pagar ontem um título que só vence daqui a 30 dias.
+    // O compromisso assumido importa mais do que "ainda não é urgente".
+    const resultado = priorizarTitulos([
+      titulo({
+        id: 't1',
+        status: 'promessa',
+        data_promessa: isoOffset(-1),
+        data_vencimento: isoOffset(30),
+      }),
+    ]);
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].categoria).toBe('preventivo');
   });
 
   it('ignora títulos vencendo a mais de 3 dias no futuro (não urgentes)', () => {
@@ -136,12 +268,15 @@ describe('agruparPorCliente', () => {
       data_vencimento: isoOffset(-diasAtraso),
       status: 'aberto',
       data_promessa: null,
+      silenciado_ate: null,
+      resolvido_em: null,
       criado_em: '',
       cliente,
       score: diasAtraso > 0 ? diasAtraso * valor : 0,
       categoria: overrides.categoria ?? 'atraso_leve',
       diasAtraso,
       mensagem: 'msg',
+      motivoReentrada: null,
       ...overrides,
     };
   }
@@ -170,6 +305,47 @@ describe('agruparPorCliente', () => {
       comPrioridade({ id: 't2', diasAtraso: 15 }),
     ]);
     expect(grupos[0].diasAtrasoMax).toBe(15);
+  });
+
+  // Regressão: esta ordenação estava invertida e passou despercebida no ciclo
+  // anterior porque nenhum teste olhava a ORDEM do resultado — só o conteúdo.
+  describe('ordenação', () => {
+    it('preventivos: quem vence hoje vem antes de quem vence em 2 dias', () => {
+      const outro: Cliente = { id: 'c2', nome: 'Maria', telefone: '5511988880000', criado_em: '' };
+      const grupos = agruparPorCliente([
+        { ...comPrioridade({ id: 't1', diasAtraso: -2, categoria: 'preventivo' }),
+          cliente_id: outro.id, cliente: outro },
+        comPrioridade({ id: 't2', diasAtraso: 0, categoria: 'preventivo' }),
+      ]);
+      expect(grupos.map((g) => g.cliente.id)).toEqual([cliente.id, outro.id]);
+      expect(grupos[0].diasAtrasoMax).toBe(0);
+    });
+
+    it('preventivos: ordem completa é do vencimento mais próximo ao mais distante', () => {
+      const c = (id: string): Cliente => ({ id, nome: id, telefone: `5511${id}`, criado_em: '' });
+      const grupos = agruparPorCliente([
+        { ...comPrioridade({ id: 'a', diasAtraso: -3, categoria: 'preventivo' }),
+          cliente_id: 'c3', cliente: c('c3') },
+        { ...comPrioridade({ id: 'b', diasAtraso: 0, categoria: 'preventivo' }),
+          cliente_id: 'c1', cliente: c('c1') },
+        { ...comPrioridade({ id: 'd', diasAtraso: -1, categoria: 'preventivo' }),
+          cliente_id: 'c2', cliente: c('c2') },
+      ]);
+      expect(grupos.map((g) => g.cliente.id)).toEqual(['c1', 'c2', 'c3']);
+    });
+
+    it('vencidos vêm antes de preventivos, por maior scoreTotal', () => {
+      const c = (id: string): Cliente => ({ id, nome: id, telefone: `5511${id}`, criado_em: '' });
+      const grupos = agruparPorCliente([
+        { ...comPrioridade({ id: 'prev', diasAtraso: 0, categoria: 'preventivo' }),
+          cliente_id: 'cPrev', cliente: c('cPrev') },
+        { ...comPrioridade({ id: 'baixo', diasAtraso: 2, valor: 100 }),
+          cliente_id: 'cBaixo', cliente: c('cBaixo') },
+        { ...comPrioridade({ id: 'alto', diasAtraso: 10, valor: 500 }),
+          cliente_id: 'cAlto', cliente: c('cAlto') },
+      ]);
+      expect(grupos.map((g) => g.cliente.id)).toEqual(['cAlto', 'cBaixo', 'cPrev']);
+    });
   });
 
   it('clientes distintos geram grupos distintos', () => {

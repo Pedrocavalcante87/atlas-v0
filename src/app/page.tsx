@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { priorizarTitulos, agruparPorCliente } from '@/lib/prioridade';
+import { totalRecuperado, JANELA_RECUPERACAO_DIAS } from '@/lib/recuperacao';
 import { Titulo, Cliente } from '@/types';
 import ClienteCard from '@/components/ClienteCard';
 import { formatarMoeda } from '@/lib/format';
@@ -9,10 +10,14 @@ export const revalidate = 0;
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const { data: titulos, error } = await supabase
-    .from('titulos')
-    .select('*, clientes(*)')
-    .eq('status', 'aberto');
+  // Busca tudo que ainda não foi pago e deixa o domínio decidir quem entra na
+  // fila de hoje (lib/prioridade.ts::estaNaFilaHoje) — títulos com promessa
+  // vencida ou silêncio expirado precisam voltar, e um filtro
+  // .eq('status','aberto') aqui os esconderia para sempre.
+  const [{ data: titulos, error }, recuperado] = await Promise.all([
+    supabase.from('titulos').select('*, clientes(*)').neq('status', 'pago'),
+    totalRecuperado(),
+  ]);
 
   if (error) {
     return (
@@ -55,9 +60,10 @@ export default async function HomePage() {
         <p className="text-sm text-slate-500 capitalize mt-0.5">{hoje}</p>
       </div>
 
-      {/* Stats */}
-      {priorizados.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 mb-6">
+      {/* Stats — o card de recuperado aparece mesmo com a fila vazia: dia sem
+          ninguém pra cobrar é justamente quando o resultado importa. */}
+      {(priorizados.length > 0 || (recuperado ?? 0) > 0) && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Vencidos</p>
             <p className="text-2xl font-bold text-red-600">{vencidos.length}</p>
@@ -69,6 +75,17 @@ export default async function HomePage() {
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Em risco</p>
             <p className="text-lg font-bold text-slate-800 truncate">{formatarMoeda(valorEmRisco)}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-emerald-200 p-4 shadow-sm">
+            <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide mb-1">Recuperado</p>
+            {/* null = a apuração falhou. Mostrar "—" em vez de R$ 0,00: zero
+                seria uma afirmação falsa sobre dinheiro. */}
+            <p className="text-lg font-bold text-emerald-700 truncate">
+              {recuperado === null ? '—' : formatarMoeda(recuperado)}
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {recuperado === null ? 'indisponível' : `últimos ${JANELA_RECUPERACAO_DIAS} dias`}
+            </p>
           </div>
         </div>
       )}
