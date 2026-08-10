@@ -148,34 +148,49 @@ describe('validarLinhaRecebida', () => {
   };
 
   it('aceita uma linha bem formada', () => {
-    expect(validarLinhaRecebida(linhaValida)).toEqual(linhaValida);
+    const resultado = validarLinhaRecebida(linhaValida);
+    expect(resultado.ok).toBe(true);
+    if (resultado.ok) expect(resultado.linha).toEqual(linhaValida);
   });
 
   it('rejeita entrada que não é objeto', () => {
-    expect(validarLinhaRecebida(null)).toBeNull();
-    expect(validarLinhaRecebida('string')).toBeNull();
-    expect(validarLinhaRecebida(42)).toBeNull();
+    expect(validarLinhaRecebida(null).ok).toBe(false);
+    expect(validarLinhaRecebida('string').ok).toBe(false);
+    expect(validarLinhaRecebida(42).ok).toBe(false);
   });
 
   it('rejeita nome vazio', () => {
-    expect(validarLinhaRecebida({ ...linhaValida, nome: '' })).toBeNull();
+    expect(validarLinhaRecebida({ ...linhaValida, nome: '' }).ok).toBe(false);
+  });
+
+  it('rejeita nome absurdamente longo', () => {
+    expect(validarLinhaRecebida({ ...linhaValida, nome: 'x'.repeat(201) }).ok).toBe(false);
   });
 
   it('rejeita telefone fora do formato normalizado (não numérico ou tamanho errado)', () => {
-    expect(validarLinhaRecebida({ ...linhaValida, telefone: '(11) 99999-0000' })).toBeNull();
-    expect(validarLinhaRecebida({ ...linhaValida, telefone: '123' })).toBeNull();
+    expect(validarLinhaRecebida({ ...linhaValida, telefone: '(11) 99999-0000' }).ok).toBe(false);
+    expect(validarLinhaRecebida({ ...linhaValida, telefone: '123' }).ok).toBe(false);
   });
 
   it('rejeita valor não numérico, zero, negativo ou acima do teto de sanidade', () => {
-    expect(validarLinhaRecebida({ ...linhaValida, valor: 'não é número' })).toBeNull();
-    expect(validarLinhaRecebida({ ...linhaValida, valor: 0 })).toBeNull();
-    expect(validarLinhaRecebida({ ...linhaValida, valor: -100 })).toBeNull();
-    expect(validarLinhaRecebida({ ...linhaValida, valor: 10_000_000_000 })).toBeNull();
+    expect(validarLinhaRecebida({ ...linhaValida, valor: 'não é número' }).ok).toBe(false);
+    expect(validarLinhaRecebida({ ...linhaValida, valor: 0 }).ok).toBe(false);
+    expect(validarLinhaRecebida({ ...linhaValida, valor: -100 }).ok).toBe(false);
+    expect(validarLinhaRecebida({ ...linhaValida, valor: 10_000_000_000 }).ok).toBe(false);
   });
 
   it('rejeita data fora do formato ISO ou fora da faixa razoável', () => {
-    expect(validarLinhaRecebida({ ...linhaValida, dataVencimento: '15/08/2025' })).toBeNull();
-    expect(validarLinhaRecebida({ ...linhaValida, dataVencimento: '1900-01-01' })).toBeNull();
+    expect(validarLinhaRecebida({ ...linhaValida, dataVencimento: '15/08/2025' }).ok).toBe(false);
+    expect(validarLinhaRecebida({ ...linhaValida, dataVencimento: '1900-01-01' }).ok).toBe(false);
+  });
+
+  it('explica o motivo da recusa em vez de só negar', () => {
+    const resultado = validarLinhaRecebida({ ...linhaValida, telefone: '123' });
+    expect(resultado.ok).toBe(false);
+    if (!resultado.ok) {
+      expect(resultado.motivo).toMatch(/telefone/i);
+      expect(resultado.motivo).toContain('123');
+    }
   });
 
   it('é a defesa real contra um payload forjado no POST /confirmar', () => {
@@ -188,6 +203,47 @@ describe('validarLinhaRecebida', () => {
       valor: 999999999999,
       dataVencimento: 'amanhã',
     };
-    expect(validarLinhaRecebida(payloadForjado)).toBeNull();
+    expect(validarLinhaRecebida(payloadForjado).ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Paridade prévia × confirmação. A prévia normaliza texto cru do CSV e depois
+// chama validarLinhaRecebida como portão final; a confirmação chama a mesma
+// função. Estes testes cobrem o caso que antes divergia: telefones que a
+// prévia aceitava (>= 8 dígitos) e a gravação recusava (10-15 dígitos), o que
+// virava descarte silencioso.
+// ---------------------------------------------------------------------------
+describe('paridade entre prévia e confirmação', () => {
+  /** Reproduz a normalização que api/upload-csv/route.ts faz antes do portão. */
+  function normalizarComoPrevia(nome: string, telefoneRaw: string, valorRaw: string, dataRaw: string) {
+    return {
+      linha: 2,
+      nome,
+      telefone: limparTelefone(telefoneRaw),
+      valor: normalizarValor(valorRaw),
+      dataVencimento: normalizarData(dataRaw) ?? '',
+    };
+  }
+
+  const hoje = new Date();
+  const dataOk = `${hoje.getFullYear()}-01-15`;
+
+  it('telefone brasileiro comum passa nos dois lados', () => {
+    const linha = normalizarComoPrevia('Cliente', '(11) 99999-0000', 'R$ 1.500,00', dataOk);
+    expect(validarLinhaRecebida(linha).ok).toBe(true);
+  });
+
+  it('telefone de 8 dígitos (fixo sem DDD) vira 10 com o DDI e passa nos dois lados', () => {
+    const linha = normalizarComoPrevia('Cliente', '33334444', '100', dataOk);
+    expect(linha.telefone).toBe('5533334444');
+    expect(validarLinhaRecebida(linha).ok).toBe(true);
+  });
+
+  it('telefone longo demais é recusado — e a prévia recusa junto, sem descarte silencioso', () => {
+    const linha = normalizarComoPrevia('Cliente', '1234567890123456', '100', dataOk);
+    const resultado = validarLinhaRecebida(linha);
+    expect(resultado.ok).toBe(false);
+    if (!resultado.ok) expect(resultado.motivo).toMatch(/telefone/i);
   });
 });

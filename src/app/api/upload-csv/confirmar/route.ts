@@ -33,31 +33,34 @@ export async function POST(request: NextRequest) {
   }
 
   const linhas: LinhaImportacao[] = [];
-  const rejeitadas: number[] = [];
+  const rejeicoes: string[] = [];
   for (const raw of linhasRecebidas) {
     const validada = validarLinhaRecebida(raw);
-    if (validada) {
-      linhas.push(validada);
+    if (validada.ok) {
+      linhas.push(validada.linha);
     } else {
-      rejeitadas.push(typeof raw?.linha === 'number' ? raw.linha : -1);
+      // A prévia aplica exatamente esta mesma validação antes de contar a linha
+      // como "pronta pra importar", então chegar aqui significa que o payload
+      // não veio da prévia. Reportar o motivo, não só o número.
+      const numero = typeof raw?.linha === 'number' ? `Linha ${raw.linha}` : 'Linha desconhecida';
+      rejeicoes.push(`${numero}: ${validada.motivo}`);
     }
   }
 
   if (linhas.length === 0) {
     return NextResponse.json(
-      { error: 'Nenhuma linha passou na revalidação — os dados recebidos não têm o formato esperado.' },
+      {
+        error:
+          'Nenhuma linha passou na revalidação — os dados recebidos não têm o formato esperado.\n\n' +
+          rejeicoes.join('\n'),
+      },
       { status: 400 },
     );
   }
 
   let count = 0;
   let duplicatas = 0;
-  const importErrors: string[] = [];
-  if (rejeitadas.length > 0) {
-    importErrors.push(
-      `${rejeitadas.length} linha(s) rejeitada(s) na revalidação (formato inesperado) — não foram gravadas.`,
-    );
-  }
+  const importErrors: string[] = [...rejeicoes];
 
   for (const l of linhas) {
     const { data: cliente, error: errCliente } = await supabase

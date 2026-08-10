@@ -9,6 +9,7 @@ import {
   normalizarData,
   limparTelefone,
   dataEmFaixaRazoavel,
+  validarLinhaRecebida,
 } from '@/lib/csv-import';
 
 // ---------------------------------------------------------------------------
@@ -144,7 +145,17 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    linhasValidas.push({ linha, nome, telefone, valor, dataVencimento });
+    // Portão final: a MESMA validação que a gravação vai aplicar. As checagens
+    // acima existem para dar mensagens boas sobre o texto cru do CSV; esta
+    // garante que nada que a prévia aprove seja recusado depois na confirmação.
+    const validada = validarLinhaRecebida({ linha, nome, telefone, valor, dataVencimento });
+    if (!validada.ok) {
+      linhasIgnoradas.push({ linha, nome, motivo: validada.motivo });
+      importErrors.push(`Linha ${linha}: ${validada.motivo}.`);
+      continue;
+    }
+
+    linhasValidas.push(validada.linha);
   }
 
   // ---- Passo 2: checar duplicatas contra o banco (somente leitura) ----

@@ -153,16 +153,34 @@ export interface LinhaImportacao {
 }
 
 const VALOR_MAXIMO = 1_000_000_000; // 1 bilhão — teto de sanidade, não regra de negócio
+export const NOME_TAMANHO_MAXIMO = 200;
+
+export type ResultadoValidacao =
+  | { ok: true; linha: LinhaImportacao }
+  | { ok: false; motivo: string };
 
 /**
- * Revalida estruturalmente uma linha que chegou como JSON não confiável
- * (ex: corpo de POST /api/upload-csv/confirmar). Diferente de normalizarValor
- * /normalizarData (que interpretam texto cru do CSV), aqui os campos já
- * deveriam estar normalizados — a função checa se o formato e a faixa fazem
- * sentido, sem tentar converter texto livre.
+ * Validação estrutural de uma linha já normalizada — a ÚNICA fonte de verdade
+ * sobre "esta linha pode ser gravada".
+ *
+ * Chamada nos dois pontos do fluxo de importação, de propósito:
+ *   1. na prévia (api/upload-csv), como último portão antes de dizer ao
+ *      usuário "N títulos prontos pra importar";
+ *   2. na confirmação (api/upload-csv/confirmar), onde o corpo do POST não é
+ *      confiável (vem do browser e pode ter sido forjado).
+ *
+ * Chamar nos dois lugares garante por construção que a prévia nunca aprove uma
+ * linha que a gravação vá recusar — antes as duas tinham regras próprias
+ * (telefone >= 8 dígitos na prévia vs. 10-15 aqui), e a diferença virava
+ * descarte silencioso na hora de gravar.
+ *
+ * Devolve o motivo da recusa para que quem chamou possa dizer ao usuário o que
+ * há de errado com a linha, em vez de um contador anônimo.
  */
-export function validarLinhaRecebida(input: unknown): LinhaImportacao | null {
-  if (!input || typeof input !== 'object') return null;
+export function validarLinhaRecebida(input: unknown): ResultadoValidacao {
+  if (!input || typeof input !== 'object') {
+    return { ok: false, motivo: 'Formato de linha inválido' };
+  }
   const l = input as Record<string, unknown>;
 
   const linha = typeof l.linha === 'number' && Number.isFinite(l.linha) ? l.linha : null;
@@ -171,12 +189,36 @@ export function validarLinhaRecebida(input: unknown): LinhaImportacao | null {
   const valor = typeof l.valor === 'number' ? l.valor : NaN;
   const dataVencimento = typeof l.dataVencimento === 'string' ? l.dataVencimento.trim() : '';
 
-  if (linha === null) return null;
-  if (!nome || nome.length > 200) return null;
-  if (!/^\d{10,15}$/.test(telefone)) return null;
-  if (!Number.isFinite(valor) || valor <= 0 || valor > VALOR_MAXIMO) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataVencimento)) return null;
-  if (!dataEmFaixaRazoavel(dataVencimento)) return null;
+  if (linha === null) {
+    return { ok: false, motivo: 'Número da linha ausente ou inválido' };
+  }
+  if (!nome) {
+    return { ok: false, motivo: 'Nome em branco' };
+  }
+  if (nome.length > NOME_TAMANHO_MAXIMO) {
+    return { ok: false, motivo: `Nome com mais de ${NOME_TAMANHO_MAXIMO} caracteres` };
+  }
+  if (!/^\d{10,15}$/.test(telefone)) {
+    return {
+      ok: false,
+      motivo: `Telefone fora do padrão esperado (10 a 15 dígitos com DDI) — "${telefone}"`,
+    };
+  }
+  if (!Number.isFinite(valor) || valor <= 0) {
+    return { ok: false, motivo: `Valor inválido — "${String(l.valor)}"` };
+  }
+  if (valor > VALOR_MAXIMO) {
+    return { ok: false, motivo: `Valor acima do limite aceito — "${String(l.valor)}"` };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataVencimento)) {
+    return { ok: false, motivo: `Data fora do formato AAAA-MM-DD — "${dataVencimento}"` };
+  }
+  if (!dataEmFaixaRazoavel(dataVencimento)) {
+    return {
+      ok: false,
+      motivo: `Data fora da faixa esperada — "${dataVencimento}" (mais de 5 anos no passado ou no futuro)`,
+    };
+  }
 
-  return { linha, nome, telefone, valor, dataVencimento };
+  return { ok: true, linha: { linha, nome, telefone, valor, dataVencimento } };
 }
