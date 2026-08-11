@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { priorizarTitulos, agruparPorCliente } from '@/lib/prioridade';
 import { totalRecuperado, JANELA_RECUPERACAO_DIAS } from '@/lib/recuperacao';
+import { lerPaginado, SupabaseIndisponivelError } from '@/lib/supabase-io';
 import { Titulo, Cliente } from '@/types';
 import ClienteCard from '@/components/ClienteCard';
 import { formatarMoeda } from '@/lib/format';
@@ -14,22 +15,39 @@ export default async function HomePage() {
   // fila de hoje (lib/prioridade.ts::estaNaFilaHoje) — títulos com promessa
   // vencida ou silêncio expirado precisam voltar, e um filtro
   // .eq('status','aberto') aqui os esconderia para sempre.
-  const [{ data: titulos, error }, recuperado] = await Promise.all([
-    supabase.from('titulos').select('*, clientes(*)').neq('status', 'pago'),
-    totalRecuperado(),
-  ]);
+  //
+  // `lerPaginado` impõe prazo, transforma qualquer falha em exceção e busca
+  // TODAS as páginas. Dois motivos, os dois medidos:
+  //
+  //  - uma lista do dia vazia precisa significar "não há o que cobrar hoje",
+  //    nunca "a consulta falhou". Sem prazo, uma queda de DNS deixava esta
+  //    página carregando por mais de um minuto antes de decidir o que mostrar;
+  //  - o PostgREST corta a resposta em 1000 linhas (confirmado neste projeto:
+  //    com 1149 títulos não pagos, um `select` sem paginar devolveu 1000). A
+  //    lista do dia simplesmente perderia as cobranças excedentes, em silêncio.
+  let titulosComClientes: (Titulo & { clientes: Cliente })[];
+  let recuperado: number | null;
 
-  if (error) {
+  try {
+    [titulosComClientes, recuperado] = await Promise.all([
+      lerPaginado<Titulo & { clientes: Cliente }>(
+        (s, de, ate) =>
+          supabase.from('titulos').select('*, clientes(*)').neq('status', 'pago').range(de, ate).abortSignal(s),
+        'títulos da lista do dia',
+      ),
+      totalRecuperado(),
+    ]);
+  } catch (e) {
+    const mensagem =
+      e instanceof SupabaseIndisponivelError ? e.message : 'Erro inesperado ao carregar os dados.';
     return (
       <main className="max-w-3xl mx-auto px-4 py-8">
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-          Erro ao carregar dados: {error.message}
+          {mensagem}
         </div>
       </main>
     );
   }
-
-  const titulosComClientes = (titulos ?? []) as (Titulo & { clientes: Cliente })[];
   const priorizados = priorizarTitulos(titulosComClientes);
 
   // Cobrança é por CLIENTE, não por título — um cliente com 3 títulos em

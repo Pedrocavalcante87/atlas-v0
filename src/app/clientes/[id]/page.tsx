@@ -1,8 +1,9 @@
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Interacao } from '@/types';
+import { Interacao, Cliente, Titulo } from '@/types';
 import { formatarMoeda } from '@/lib/format';
+import { ler, lerPaginado, SupabaseIndisponivelError } from '@/lib/supabase-io';
 
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';
@@ -35,19 +36,46 @@ function formatarData(iso: string) {
 export default async function ClienteHistoricoPage({ params }: PageProps) {
   const { id } = await params;
 
-  const { data: cliente } = await supabase
-    .from('clientes')
-    .select('*')
-    .eq('id', id)
-    .single();
+  // O erro destas consultas era ignorado. Com o banco fora, `cliente` vinha
+  // nulo e a página respondia notFound() — dizia "este cliente não existe"
+  // quando o certo era "não consegui verificar". Pior nos totais logo abaixo:
+  // eles somam dinheiro, e uma leitura falha ou truncada em 1000 linhas
+  // (teto do PostgREST) devolveria um total menor do que o cliente realmente
+  // deve, sem nenhum sinal de que faltou coisa.
+  let cliente: Cliente | null;
+  let titulos: (Titulo & { interacoes: Interacao[] })[];
+
+  try {
+    [{ data: cliente }, titulos] = await Promise.all([
+      ler<Cliente | null>(
+        (s) => supabase.from('clientes').select('*').eq('id', id).abortSignal(s).maybeSingle(),
+        'cliente do histórico',
+      ),
+      lerPaginado<Titulo & { interacoes: Interacao[] }>(
+        (s, de, ate) =>
+          supabase
+            .from('titulos')
+            .select('*, interacoes(*)')
+            .eq('cliente_id', id)
+            .order('data_vencimento', { ascending: false })
+            .range(de, ate)
+            .abortSignal(s),
+        'títulos do cliente',
+      ),
+    ]);
+  } catch (e) {
+    const mensagem =
+      e instanceof SupabaseIndisponivelError ? e.message : 'Erro inesperado ao carregar o histórico.';
+    return (
+      <main className="max-w-3xl mx-auto px-4 py-8">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+          {mensagem}
+        </div>
+      </main>
+    );
+  }
 
   if (!cliente) notFound();
-
-  const { data: titulos } = await supabase
-    .from('titulos')
-    .select('*, interacoes(*)')
-    .eq('cliente_id', id)
-    .order('data_vencimento', { ascending: false });
 
   // "Em aberto" = tudo que ainda não foi pago. Filtrar por status === 'aberto'
   // deixaria de fora títulos em 'promessa' e 'sem_resposta', que continuam
