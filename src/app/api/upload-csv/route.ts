@@ -182,26 +182,22 @@ export async function POST(request: NextRequest) {
 
   try {
     for (const lote of emLotes(telefonesUnicos, LOTE_IDS_EM_FILTRO)) {
-      const encontrados = await lerPaginado<{ id: string; telefone: string }>(
-        (s, de, ate) =>
-          supabase.from('clientes').select('id, telefone').in('telefone', lote).range(de, ate).abortSignal(s),
-        'clientes já cadastrados',
-      );
+      const encontrados = await lerPaginado<{ id: string; telefone: string }>((s, apos, limite) => {
+        const base = supabase.from('clientes').select('id, telefone', { count: 'exact' }).in('telefone', lote);
+        return (apos ? base.gt('id', apos) : base).order('id').limit(limite).abortSignal(s);
+      }, 'clientes já cadastrados');
       for (const c of encontrados) clienteIdPorTelefone.set(c.telefone, c.id);
     }
 
     for (const lote of emLotes([...clienteIdPorTelefone.values()], LOTE_IDS_EM_FILTRO)) {
-      const encontrados = await lerPaginado<TituloExistente>(
-        (s, de, ate) =>
-          supabase
-            .from('titulos')
-            .select('cliente_id, valor, data_vencimento')
-            .in('cliente_id', lote)
-            .eq('status', 'aberto')
-            .range(de, ate)
-            .abortSignal(s),
-        'títulos já existentes',
-      );
+      const encontrados = await lerPaginado<TituloExistente & { id: string }>((s, apos, limite) => {
+        const base = supabase
+          .from('titulos')
+          .select('id, cliente_id, valor, data_vencimento', { count: 'exact' })
+          .in('cliente_id', lote)
+          .eq('status', 'aberto');
+        return (apos ? base.gt('id', apos) : base).order('id').limit(limite).abortSignal(s);
+      }, 'títulos já existentes');
       titulosExistentes.push(...encontrados);
     }
   } catch (e) {

@@ -51,17 +51,16 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
         (s) => supabase.from('clientes').select('*').eq('id', id).abortSignal(s).maybeSingle(),
         'cliente do histórico',
       ),
-      lerPaginado<Titulo & { interacoes: Interacao[] }>(
-        (s, de, ate) =>
-          supabase
-            .from('titulos')
-            .select('*, interacoes(*)')
-            .eq('cliente_id', id)
-            .order('data_vencimento', { ascending: false })
-            .range(de, ate)
-            .abortSignal(s),
-        'títulos do cliente',
-      ),
+      // Ordenado por `id` para paginar com cursor; a ordem de EXIBIÇÃO
+      // (vencimento mais recente primeiro) é reaplicada em memória abaixo —
+      // paginação precisa de chave estável e única, `data_vencimento` não é.
+      lerPaginado<Titulo & { interacoes: Interacao[] }>((s, apos, limite) => {
+        const base = supabase
+          .from('titulos')
+          .select('*, interacoes(*)', { count: 'exact' })
+          .eq('cliente_id', id);
+        return (apos ? base.gt('id', apos) : base).order('id').limit(limite).abortSignal(s);
+      }, 'títulos do cliente'),
     ]);
   } catch (e) {
     const mensagem =
@@ -76,6 +75,11 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
   }
 
   if (!cliente) notFound();
+
+  // A leitura veio ordenada por `id` (exigência da paginação por cursor).
+  // Reaplica aqui a ordem que esta tela sempre teve: vencimento mais recente
+  // primeiro. É ordenação de apresentação sobre uma lista já completa.
+  titulos.sort((a, b) => b.data_vencimento.localeCompare(a.data_vencimento));
 
   // "Em aberto" = tudo que ainda não foi pago. Filtrar por status === 'aberto'
   // deixaria de fora títulos em 'promessa' e 'sem_resposta', que continuam

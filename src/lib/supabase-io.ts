@@ -166,31 +166,59 @@ export async function gravar<T>(montar: MontarConsulta<T>, oQue: string): Promis
 }
 
 /**
- * Lê uma lista inteira, paginando até acabar.
+ * Lê uma lista inteira, página por página, por CURSOR (keyset).
  *
- * Existe porque o PostgREST aplica um teto de linhas por resposta
- * (`db-max-rows`, tipicamente 1000 no Supabase) e uma resposta truncada é
- * indistinguível de uma resposta completa: `data.length` simplesmente vem
- * menor. Num `select` que alimenta soma de dinheiro isso subnotifica o total
- * em silêncio; num `select` que alimenta checagem de duplicata, faz o sistema
- * inserir título repetido. Paginar torna a pergunta "qual é o teto?"
- * irrelevante — no caso normal (menos de uma página) é uma requisição só.
+ * Existe porque o PostgREST corta a resposta num teto de linhas
+ * (`db-max-rows`, 1000 neste projeto) e uma resposta truncada é indistinguível
+ * de uma completa: `data.length` simplesmente vem menor. Num `select` que
+ * alimenta soma de dinheiro isso subnotifica o total em silêncio; num que
+ * alimenta checagem de duplicata, faz o sistema inserir título repetido.
+ *
+ * Duas propriedades que a versão anterior (offset + "parou porque a página veio
+ * incompleta") NÃO tinha, e que uma auditoria derrubou:
+ *
+ *  1. **Independência do teto do servidor.** Antes o loop parava quando a
+ *     página vinha com menos linhas do que o pedido, o que só funcionava porque
+ *     o tamanho da página era igual ao teto. Medido: pedindo páginas de 1500
+ *     contra um teto de 1000, o loop parava na primeira e perdia 269 de 1269
+ *     linhas — o mesmo truncamento silencioso que ele existia para impedir.
+ *     Agora o avanço é pelo ÚLTIMO ID RECEBIDO, então quantas linhas o servidor
+ *     decidiu devolver deixa de ser uma informação de controle.
+ *  2. **Ordem determinística.** Paginação por offset sem `order by` não garante
+ *     que as páginas particionem o conjunto: entre uma requisição e a seguinte
+ *     o Postgres pode devolver as linhas em outra ordem e uma linha some ou
+ *     aparece duas vezes numa soma de dinheiro. O cursor obriga `order by id`.
+ *
+ * Termina pelo `count` exato quando ele vem (sem requisição extra no caminho
+ * comum) e, como rede de segurança, quando uma página volta vazia. Quem chama
+ * precisa ordenar por `id`, aplicar `.gt('id', apos)` e selecionar a coluna
+ * `id` — o tipo genérico força isso.
  */
-export async function lerPaginado<T>(
-  montarPagina: (sinal: AbortSignal, de: number, ate: number) => PromiseLike<RespostaSupabase<T[]>>,
+export async function lerPaginado<T extends { id: string }>(
+  montarPagina: (sinal: AbortSignal, apos: string | null, limite: number) => PromiseLike<RespostaSupabase<T[]>>,
   oQue: string,
 ): Promise<T[]> {
   const tudo: T[] = [];
+  let apos: string | null = null;
+  let total: number | null = null;
 
   for (let pagina = 0; ; pagina++) {
-    const de = pagina * PAGINA_LEITURA;
-    const { data } = await ler<T[]>(
-      (sinal) => montarPagina(sinal, de, de + PAGINA_LEITURA - 1),
+    const cursor: string | null = apos;
+    const pagina_: { data: T[]; count: number | null } = await ler<T[]>(
+      (sinal) => montarPagina(sinal, cursor, PAGINA_LEITURA),
       `${oQue} (página ${pagina + 1})`,
     );
+    const { data, count } = pagina_;
 
-    const linhas = data ?? [];
+    const linhas: T[] = data ?? [];
+    if (linhas.length === 0) return tudo;
+
     tudo.push(...linhas);
-    if (linhas.length < PAGINA_LEITURA) return tudo;
+    apos = linhas[linhas.length - 1].id;
+
+    // O count exato só é pedido/confiável na primeira página; nas seguintes o
+    // filtro de cursor já reduz o universo contado.
+    if (pagina === 0) total = count;
+    if (total !== null && tudo.length >= total) return tudo;
   }
 }

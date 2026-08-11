@@ -30,11 +30,10 @@ export default async function HomePage() {
 
   try {
     [titulosComClientes, recuperado] = await Promise.all([
-      lerPaginado<Titulo & { clientes: Cliente }>(
-        (s, de, ate) =>
-          supabase.from('titulos').select('*, clientes(*)').neq('status', 'pago').range(de, ate).abortSignal(s),
-        'títulos da lista do dia',
-      ),
+      lerPaginado<Titulo & { clientes: Cliente }>((s, apos, limite) => {
+        const base = supabase.from('titulos').select('*, clientes(*)', { count: 'exact' }).neq('status', 'pago');
+        return (apos ? base.gt('id', apos) : base).order('id').limit(limite).abortSignal(s);
+      }, 'títulos da lista do dia'),
       totalRecuperado(),
     ]);
   } catch (e) {

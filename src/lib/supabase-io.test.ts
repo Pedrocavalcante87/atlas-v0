@@ -111,33 +111,74 @@ describe('ler', () => {
 });
 
 describe('lerPaginado', () => {
-  it('uma página só quando o resultado cabe nela', async () => {
-    const paginas = vi.fn(async () => ({ data: [1, 2, 3], error: null }));
-    const tudo = await lerPaginado<number>(paginas, 'teste');
-    expect(tudo).toEqual([1, 2, 3]);
-    expect(paginas).toHaveBeenCalledTimes(1);
+  /** Banco falso paginável por cursor, com teto de linhas configurável. */
+  function bancoFalso(totalLinhas: number, tetoDoServidor: number) {
+    const linhas = Array.from({ length: totalLinhas }, (_, i) => ({
+      id: String(i + 1).padStart(6, '0'),
+    }));
+    const chamadas: (string | null)[] = [];
+
+    const montar = async (_s: AbortSignal, apos: string | null, limite: number) => {
+      chamadas.push(apos);
+      const restantes = apos ? linhas.filter((l) => l.id > apos) : linhas;
+      // O servidor devolve no máximo o SEU teto, ignorando um limite maior.
+      const data = restantes.slice(0, Math.min(limite, tetoDoServidor));
+      return { data, error: null, count: totalLinhas } as RespostaSupabase<{ id: string }[]>;
+    };
+
+    return { montar, chamadas };
+  }
+
+  it('uma requisição só quando tudo cabe numa página', async () => {
+    const { montar, chamadas } = bancoFalso(3, PAGINA_LEITURA);
+    const tudo = await lerPaginado(montar, 'teste');
+    expect(tudo).toHaveLength(3);
+    expect(chamadas).toEqual([null]);
   });
 
-  it('continua paginando enquanto a página vier cheia', async () => {
-    // Protege a soma de dinheiro: uma resposta truncada pelo teto de linhas do
-    // PostgREST é indistinguível de uma resposta completa, e subnotificaria o
-    // total em silêncio.
-    const cheia = Array.from({ length: PAGINA_LEITURA }, (_, i) => i);
-    const paginas = vi
-      .fn<(s: AbortSignal, de: number, ate: number) => Promise<RespostaSupabase<number[]>>>()
-      .mockResolvedValueOnce({ data: cheia, error: null })
-      .mockResolvedValueOnce({ data: [999], error: null });
+  it('avança pelo último id recebido, não por offset', async () => {
+    const { montar, chamadas } = bancoFalso(2500, PAGINA_LEITURA);
+    const tudo = await lerPaginado(montar, 'teste');
+    expect(tudo).toHaveLength(2500);
+    expect(chamadas[0]).toBeNull();
+    expect(chamadas[1]).toBe('001000');
+    expect(chamadas[2]).toBe('002000');
+  });
 
-    const tudo = await lerPaginado<number>(paginas, 'teste');
-    expect(tudo).toHaveLength(PAGINA_LEITURA + 1);
-    expect(paginas).toHaveBeenCalledTimes(2);
-    expect(paginas.mock.calls[1][1]).toBe(PAGINA_LEITURA);
+  it('REGRESSÃO: lê tudo mesmo se o teto do servidor for MENOR que a página pedida', async () => {
+    // A versão anterior parava quando a página vinha "incompleta", o que só
+    // funcionava porque o tamanho da página era igual ao teto do PostgREST.
+    // Medido contra o banco real: pedindo 1500 com teto de 1000, ela devolvia
+    // 1000 de 1269 linhas e subnotificava a soma em R$ 137 mil, calada.
+    const { montar } = bancoFalso(1269, 400);
+    const tudo = await lerPaginado(montar, 'teste');
+    expect(tudo).toHaveLength(1269);
+    expect(new Set(tudo.map((l) => l.id)).size).toBe(1269);
+  });
+
+  it('não repete nem pula linha entre páginas', async () => {
+    const { montar } = bancoFalso(2000, 512);
+    const tudo = await lerPaginado(montar, 'teste');
+    const ids = tudo.map((l) => l.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual([...ids].sort());
+  });
+
+  it('para numa página vazia mesmo sem count (rede de segurança)', async () => {
+    const semCount = vi
+      .fn<(s: AbortSignal, apos: string | null, limite: number) => Promise<RespostaSupabase<{ id: string }[]>>>()
+      .mockResolvedValueOnce({ data: [{ id: 'a' }], error: null, count: null })
+      .mockResolvedValueOnce({ data: [], error: null, count: null });
+
+    const tudo = await lerPaginado(semCount, 'teste');
+    expect(tudo).toEqual([{ id: 'a' }]);
+    expect(semCount).toHaveBeenCalledTimes(2);
   });
 
   it('propaga a indisponibilidade em vez de devolver lista parcial', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await expect(
-      lerPaginado<number>(responde<number[]>({ error: erroDeRede }), 'teste'),
+      lerPaginado(responde<{ id: string }[]>({ error: erroDeRede }), 'teste'),
     ).rejects.toBeInstanceOf(SupabaseIndisponivelError);
   });
 });

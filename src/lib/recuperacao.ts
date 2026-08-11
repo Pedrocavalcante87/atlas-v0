@@ -81,17 +81,14 @@ export async function totalRecuperado(
   const desde = inicioJanelaRecuperacao(dias).toISOString();
 
   try {
-    const linhas = await lerPaginado<TituloRecuperavel>(
-      (sinal, de, ate) =>
-        supabase
-          .from('titulos')
-          .select('valor, resolvido_em')
-          .eq('status', 'pago')
-          .gte('resolvido_em', desde)
-          .range(de, ate)
-          .abortSignal(sinal),
-      'apuração de receita recuperada',
-    );
+    const linhas = await lerPaginado<TituloRecuperavel & { id: string }>((sinal, apos, limite) => {
+      const base = supabase
+        .from('titulos')
+        .select('id, valor, resolvido_em', { count: 'exact' })
+        .eq('status', 'pago')
+        .gte('resolvido_em', desde);
+      return (apos ? base.gt('id', apos) : base).order('id').limit(limite).abortSignal(sinal);
+    }, 'apuração de receita recuperada');
 
     // O filtro já veio do banco; somarRecuperado reaplica a janela porque é ele
     // que os testes cobrem — a função continua correta mesmo com linhas a mais.

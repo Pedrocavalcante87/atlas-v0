@@ -9,6 +9,7 @@ import { emLotes } from '@/lib/csv-import';
 const LOTE_IDS_EM_FILTRO = 100;
 
 interface TituloEmAberto {
+  id: string;
   valor: number;
   data_vencimento: string;
 }
@@ -43,11 +44,13 @@ export async function GET() {
       ler((s) => supabase.from('interacoes').select('*', { count: 'exact', head: true }).abortSignal(s), 'contagem de interações'),
       // Paginado: esta lista alimenta soma de dinheiro, e uma resposta truncada
       // pelo teto de linhas do PostgREST subnotificaria o total em silêncio.
-      lerPaginado<TituloEmAberto>(
-        (s, de, ate) =>
-          supabase.from('titulos').select('valor, data_vencimento').neq('status', 'pago').range(de, ate).abortSignal(s),
-        'títulos não pagos',
-      ),
+      lerPaginado<TituloEmAberto>((s, apos, limite) => {
+        const base = supabase
+          .from('titulos')
+          .select('id, valor, data_vencimento', { count: 'exact' })
+          .neq('status', 'pago');
+        return (apos ? base.gt('id', apos) : base).order('id').limit(limite).abortSignal(s);
+      }, 'títulos não pagos'),
       ler((s) => supabase.from('titulos').select('*', { count: 'exact', head: true }).neq('status', 'pago').abortSignal(s), 'contagem de títulos em aberto'),
       ler((s) => supabase.from('titulos').select('*', { count: 'exact', head: true }).eq('status', 'pago').abortSignal(s), 'contagem de títulos pagos'),
       totalRecuperado(),
@@ -138,11 +141,10 @@ export async function DELETE(request: NextRequest) {
     // não pagas que estão apenas aguardando follow-up, junto com todo o
     // histórico de interações delas. Perda de dado financeiro, não limpeza.
     try {
-      const ids = await lerPaginado<{ id: string }>(
-        (s, de, ate) =>
-          supabase.from('titulos').select('id').eq('status', 'pago').range(de, ate).abortSignal(s),
-        'títulos pagos a remover',
-      );
+      const ids = await lerPaginado<{ id: string }>((s, apos, limite) => {
+        const base = supabase.from('titulos').select('id', { count: 'exact' }).eq('status', 'pago');
+        return (apos ? base.gt('id', apos) : base).order('id').limit(limite).abortSignal(s);
+      }, 'títulos pagos a remover');
 
       for (const lote of emLotes(ids.map((t) => t.id), LOTE_IDS_EM_FILTRO)) {
         for (const [oQue, construir] of [
