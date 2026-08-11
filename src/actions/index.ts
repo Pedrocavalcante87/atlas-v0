@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { supabase } from '@/lib/supabase';
+import { calcularSilenciadoAte } from '@/lib/prioridade';
 import { StatusTitulo } from '@/types';
 
 /**
@@ -55,13 +56,33 @@ export async function atualizarStatusTitulo(
     });
   }
 
-  await supabase
+  // Só 'pago' encerra o título. 'promessa' e 'sem_resposta' apenas o tiram da
+  // fila até a data correspondente — quem lê isso de volta é
+  // lib/prioridade.ts::estaNaFilaHoje. Os três campos são sempre reescritos
+  // juntos para não sobrar estado de uma marcação anterior (ex: um título que
+  // tinha promessa e depois virou "sem resposta" não pode voltar pela promessa
+  // antiga).
+  const { error } = await supabase
     .from('titulos')
     .update({
       status,
-      data_promessa: dataPromessa ?? null,
+      data_promessa: status === 'promessa' ? (dataPromessa ?? null) : null,
+      silenciado_ate: status === 'sem_resposta' ? calcularSilenciadoAte() : null,
+      resolvido_em: status === 'pago' ? new Date().toISOString() : null,
     })
     .eq('id', tituloId);
+
+  // Falhar alto: sem isso a UI marcava o título como resolvido na tela
+  // enquanto o banco continuava intacto — o usuário achava que registrou uma
+  // cobrança que nunca foi gravada.
+  if (error) {
+    throw new Error(
+      `Não foi possível registrar o resultado do título. ${error.message}` +
+      (error.message.includes('does not exist')
+        ? ' — rode supabase/migration-01-ciclo-operacional.sql.'
+        : ''),
+    );
+  }
 
   revalidatePath('/');
   revalidatePath('/clientes', 'layout');

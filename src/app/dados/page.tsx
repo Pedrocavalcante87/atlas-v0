@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { formatarMoeda } from '@/lib/format';
 
 interface Stats {
   clientes: number;
@@ -11,10 +12,9 @@ interface Stats {
   interacoes: number;
   valorVencido: number;
   valorAberto: number;
-}
-
-function formatarMoeda(v: number) {
-  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  /** null quando a apuração falha — nunca exibir como zero (ver lib/recuperacao.ts). */
+  valorRecuperado: number | null;
+  janelaRecuperacaoDias: number;
 }
 
 export default function DadosPage() {
@@ -24,8 +24,12 @@ export default function DadosPage() {
   const [deletando, setDeletando] = useState(false);
   const [mensagem, setMensagem] = useState('');
 
+  // Não seta loadingStats(true) aqui — o estado inicial já é `true` (skeleton
+  // aparece no primeiro render) e chamar setState de forma síncrona dentro do
+  // efeito de montagem dispara re-render em cascata. Quem precisa mostrar o
+  // skeleton de novo depois de montado (recarregar após limpar dados) seta
+  // explicitamente antes de chamar esta função — ver `limpar()` abaixo.
   const carregarStats = useCallback(async () => {
-    setLoadingStats(true);
     const res = await fetch('/api/dados', { cache: 'no-store' });
     const data = await res.json();
     setStats(data);
@@ -33,17 +37,34 @@ export default function DadosPage() {
   }, []);
 
   useEffect(() => {
+    // Fetch-on-mount intencional (única tela do app que é Client Component +
+    // fetch a uma API Route — ver ARCHITECTURE.md §4.4). A regra experimental
+    // react-hooks/set-state-in-effect prefere padrões de fetch baseados em
+    // Suspense/bibliotecas dedicadas; migrar isso é uma mudança de padrão de
+    // dados maior do que o escopo desta tela justifica hoje.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     carregarStats();
   }, [carregarStats]);
 
   async function limpar(modo: 'tudo' | 'concluidos') {
     setDeletando(true);
-    const res = await fetch(`/api/dados?modo=${modo}`, { method: 'DELETE' });
-    const data = await res.json();
-    setMensagem(data.mensagem ?? 'Dados removidos.');
+    setMensagem('');
+    const res = await fetch(`/api/dados?modo=${modo}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      // "tudo" exige a frase exata que o servidor valida — ver api/dados/route.ts.
+      body: JSON.stringify(modo === 'tudo' ? { confirmacao: 'EXCLUIR TUDO' } : {}),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      setMensagem(data?.error ?? 'Erro ao remover dados.');
+    } else {
+      setMensagem(data.mensagem ?? 'Dados removidos.');
+      setLoadingStats(true);
+      await carregarStats();
+    }
     setConfirmacao(null);
     setDeletando(false);
-    await carregarStats();
   }
 
   return (
@@ -62,7 +83,7 @@ export default function DadosPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
         {loadingStats ? (
-          Array.from({ length: 6 }).map((_, i) => (
+          Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm animate-pulse">
               <div className="h-3 bg-slate-100 rounded w-2/3 mb-2" />
               <div className="h-6 bg-slate-100 rounded w-1/2" />
@@ -71,8 +92,17 @@ export default function DadosPage() {
         ) : stats ? (
           <>
             <StatCard label="Clientes" value={stats.clientes} />
-            <StatCard label="Títulos abertos" value={stats.titulosAbertos} highlight="blue" />
-            <StatCard label="Títulos concluídos" value={stats.titulosConcluidos} />
+            <StatCard
+              label="Títulos em aberto"
+              value={stats.titulosAbertos}
+              highlight="blue"
+              hint="Tudo que ainda não foi pago, incluindo follow-ups"
+            />
+            <StatCard
+              label="Títulos pagos"
+              value={stats.titulosConcluidos}
+              hint="Único estado que encerra um título"
+            />
             <StatCard label="Total de títulos" value={stats.titulos} />
             {/* Valor vencido = mesma lógica da lista do dia (diasAtraso > 0) */}
             <StatCard
@@ -86,6 +116,15 @@ export default function DadosPage() {
               label="Total em aberto"
               value={formatarMoeda(stats.valorAberto)}
               hint="Inclui vencidos + títulos que ainda vão vencer"
+            />
+            <StatCard
+              label="Recuperado"
+              value={stats.valorRecuperado === null ? '—' : formatarMoeda(stats.valorRecuperado)}
+              hint={
+                stats.valorRecuperado === null
+                  ? 'Apuração indisponível — confira o log do servidor'
+                  : `Títulos pagos nos últimos ${stats.janelaRecuperacaoDias} dias`
+              }
             />
           </>
         ) : (
@@ -110,9 +149,9 @@ export default function DadosPage() {
 
         <div className="divide-y divide-slate-100">
           <AcaoPerigo
-            titulo="Limpar títulos concluídos"
-            descricao="Remove títulos marcados como pago, prometeu pagar ou sem resposta. Clientes e títulos em aberto são mantidos."
-            labelBotao="Limpar concluídos"
+            titulo="Limpar títulos pagos"
+            descricao="Remove apenas títulos já pagos, com o histórico de interações deles. Títulos aguardando follow-up (promessa ou sem resposta) são mantidos — continuam sendo dívida em aberto."
+            labelBotao="Limpar pagos"
             cor="amber"
             confirmando={confirmacao === 'concluidos'}
             deletando={deletando}

@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...exceto o template de exemplo — README manda `cp .env.local.example .env.local`
+# no setup, então esse arquivo precisa estar versionado (sem segredo nenhum dentro).
+!.env.local.example
 
 # vercel
 .vercel

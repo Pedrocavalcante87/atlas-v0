@@ -1,21 +1,23 @@
 import { supabase } from '@/lib/supabase';
-import { priorizarTitulos } from '@/lib/prioridade';
+import { priorizarTitulos, agruparPorCliente } from '@/lib/prioridade';
+import { totalRecuperado, JANELA_RECUPERACAO_DIAS } from '@/lib/recuperacao';
 import { Titulo, Cliente } from '@/types';
-import TituloCard from '@/components/TituloCard';
+import ClienteCard from '@/components/ClienteCard';
+import { formatarMoeda } from '@/lib/format';
 import Link from 'next/link';
 
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';
 
-function formatarMoeda(valor: number) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
 export default async function HomePage() {
-  const { data: titulos, error } = await supabase
-    .from('titulos')
-    .select('*, clientes(*)')
-    .eq('status', 'aberto');
+  // Busca tudo que ainda não foi pago e deixa o domínio decidir quem entra na
+  // fila de hoje (lib/prioridade.ts::estaNaFilaHoje) — títulos com promessa
+  // vencida ou silêncio expirado precisam voltar, e um filtro
+  // .eq('status','aberto') aqui os esconderia para sempre.
+  const [{ data: titulos, error }, recuperado] = await Promise.all([
+    supabase.from('titulos').select('*, clientes(*)').neq('status', 'pago'),
+    totalRecuperado(),
+  ]);
 
   if (error) {
     return (
@@ -29,6 +31,15 @@ export default async function HomePage() {
 
   const titulosComClientes = (titulos ?? []) as (Titulo & { clientes: Cliente })[];
   const priorizados = priorizarTitulos(titulosComClientes);
+
+  // Cobrança é por CLIENTE, não por título — um cliente com 3 títulos em
+  // aberto aparece uma vez, com mensagem e envio de WhatsApp consolidados
+  // (lib/prioridade.ts::agruparPorCliente). Os cards de estatística no topo
+  // continuam contando títulos individuais, que é o que o texto de cada card
+  // descreve ("títulos já em atraso" / "títulos que vencem em até 3 dias").
+  const grupos = agruparPorCliente(priorizados);
+  const gruposVencidos    = grupos.filter((g) => g.diasAtrasoMax > 0);
+  const gruposPreventivos = grupos.filter((g) => g.diasAtrasoMax <= 0);
 
   const vencidos    = priorizados.filter((t) => t.diasAtraso > 0);
   const preventivos = priorizados.filter((t) => t.diasAtraso <= 0);
@@ -49,9 +60,10 @@ export default async function HomePage() {
         <p className="text-sm text-slate-500 capitalize mt-0.5">{hoje}</p>
       </div>
 
-      {/* Stats */}
-      {priorizados.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 mb-6">
+      {/* Stats — o card de recuperado aparece mesmo com a fila vazia: dia sem
+          ninguém pra cobrar é justamente quando o resultado importa. */}
+      {(priorizados.length > 0 || (recuperado ?? 0) > 0) && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Vencidos</p>
             <p className="text-2xl font-bold text-red-600">{vencidos.length}</p>
@@ -63,6 +75,17 @@ export default async function HomePage() {
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Em risco</p>
             <p className="text-lg font-bold text-slate-800 truncate">{formatarMoeda(valorEmRisco)}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-emerald-200 p-4 shadow-sm">
+            <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide mb-1">Recuperado</p>
+            {/* null = a apuração falhou. Mostrar "—" em vez de R$ 0,00: zero
+                seria uma afirmação falsa sobre dinheiro. */}
+            <p className="text-lg font-bold text-emerald-700 truncate">
+              {recuperado === null ? '—' : formatarMoeda(recuperado)}
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {recuperado === null ? 'indisponível' : `últimos ${JANELA_RECUPERACAO_DIAS} dias`}
+            </p>
           </div>
         </div>
       )}
@@ -85,24 +108,28 @@ export default async function HomePage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {vencidos.length > 0 && (
+          {gruposVencidos.length > 0 && (
             <>
               <p className="text-xs font-semibold text-red-500 uppercase tracking-widest px-1">
                 🔴 Vencidos — cobrar hoje
               </p>
-              {vencidos.map((titulo) => (
-                <TituloCard key={titulo.id} titulo={titulo} />
-              ))}
+              <div className="space-y-3">
+                {gruposVencidos.map((grupo) => (
+                  <ClienteCard key={grupo.cliente.id} grupo={grupo} />
+                ))}
+              </div>
             </>
           )}
-          {preventivos.length > 0 && (
-            <div className={vencidos.length > 0 ? 'pt-3' : ''}>
+          {gruposPreventivos.length > 0 && (
+            <div className={gruposVencidos.length > 0 ? 'pt-3' : ''}>
               <p className="text-xs font-semibold text-amber-500 uppercase tracking-widest px-1 mb-3">
                 🟡 A vencer — enviar lembrete
               </p>
-              {preventivos.map((titulo) => (
-                <TituloCard key={titulo.id} titulo={titulo} />
-              ))}
+              <div className="space-y-3">
+                {gruposPreventivos.map((grupo) => (
+                  <ClienteCard key={grupo.cliente.id} grupo={grupo} />
+                ))}
+              </div>
             </div>
           )}
         </div>

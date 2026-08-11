@@ -17,7 +17,9 @@ O Atlas faz tudo isso automaticamente:
 2. O sistema calcula quem tem prioridade (baseado em dias de atraso e valor em risco).
 3. Exibe uma lista ordenada com a mensagem de cobrança já escrita para cada cliente.
 4. Com um clique você abre o WhatsApp com a mensagem pronta.
-5. Você registra o resultado (pago, prometeu, sem resposta) e o título sai da lista.
+5. Você registra o resultado (pago, prometeu, sem resposta). O título sai da lista — mas só sai
+   **para sempre** se foi pago: promessa e sem resposta voltam sozinhas depois (ver
+   [Status dos títulos](#status-dos-títulos)).
 
 ---
 
@@ -48,7 +50,7 @@ Login → Importar CSV → Ver Lista do Dia → Enviar WhatsApp → Registrar re
 
 Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor via variável de ambiente (`APP_PASSWORD`). Após o login, um cookie seguro é salvo por 30 dias — o usuário não precisa digitar a senha novamente nesse período.
 
-> **Para testadores:** se o ambiente não tiver senha configurada (desenvolvimento local), o login é ignorado e você entra direto.
+> **Para testadores:** em desenvolvimento local sem senha configurada, o login é ignorado e você entra direto. Em produção sem senha configurada o app responde 503 em vez de liberar o acesso.
 
 ---
 
@@ -63,6 +65,11 @@ Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor v
 | **Vencidos** | Quantidade de títulos já em atraso |
 | **A vencer** | Títulos que vencem hoje ou nos próximos 3 dias |
 | **Em risco** | Soma em reais de todos os títulos vencidos |
+| **Recuperado** | Quanto foi efetivamente pago nos últimos 30 dias |
+
+> O card **Recuperado** é a métrica que mais importa: é o dinheiro que voltou para o caixa. Se
+> aparecer "—", a apuração não pôde ser feita (normalmente falta rodar a migration do banco) —
+> o Atlas mostra um traço em vez de R$ 0,00 de propósito, porque zero seria uma afirmação falsa.
 
 **Seções da lista:**
 
@@ -81,7 +88,9 @@ Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor v
 - Botão **"Enviar via WhatsApp"** — abre o WhatsApp com a mensagem consolidada preenchida e registra o envio em todos os títulos em aberto daquele cliente
 - Uma lista compacta com cada título individual do cliente: valor, badge de dias em atraso/a vencer, e seus próprios botões de resultado — **Pago**, **Prometeu pagar**, **Sem resposta** — porque o cliente pode pagar um título e não outro
 
-Ao registrar um resultado, aquele título some da lista de pendentes. O card do cliente continua aparecendo enquanto ele tiver outros títulos em aberto.
+Ao registrar um resultado, aquele título some da lista do dia. O card do cliente continua aparecendo enquanto ele tiver outros títulos pendentes.
+
+Se o resultado foi **prometeu pagar** ou **sem resposta**, o título não foi encerrado — ele volta à lista depois (na data prometida, ou passados alguns dias de silêncio) marcado com o motivo do retorno, para você saber que já falou com essa pessoa. Só **pago** encerra um título de vez.
 
 ---
 
@@ -162,20 +171,25 @@ Painel administrativo com visão geral do banco de dados e opções de limpeza. 
 **Estatísticas exibidas:**
 
 - Total de clientes cadastrados
-- Total de títulos em aberto
-- Total de títulos concluídos
+- Total de clientes cadastrados
+- Títulos em aberto — tudo que ainda não foi pago, incluindo os que aguardam follow-up
+- Títulos pagos — o único estado que encerra um título
 - Total geral de títulos
-- Total de interações registradas
-- Valor total em risco (soma dos títulos em aberto)
+- Valor vencido (mesma conta da lista do dia) e Total em aberto (inclui o que ainda vai vencer)
+- Recuperado — soma dos títulos pagos nos últimos 30 dias
 
 **Ações de limpeza:**
 
 | Ação | O que remove |
 |---|---|
-| Limpar títulos concluídos | Títulos com status pago, prometeu ou sem resposta. Clientes e títulos em aberto são preservados. |
+| Limpar títulos pagos | **Apenas** títulos já pagos, com o histórico de interações deles. Títulos aguardando follow-up (promessa ou sem resposta) são preservados — continuam sendo dívida em aberto. |
 | Limpar tudo | Remove absolutamente todos os dados (clientes, títulos, interações). O sistema volta ao estado inicial. |
 
 > ⚠️ Ambas as ações são **irreversíveis**. Há uma etapa de confirmação antes de executar.
+>
+> Atenção ao "Limpar títulos pagos": apagar um título pago também apaga o registro de que ele foi
+> recuperado, então o valor sai da apuração dos últimos 30 dias. Use com parcimônia se quiser
+> preservar o histórico da métrica.
 
 ---
 
@@ -195,9 +209,11 @@ O algoritmo de prioridade funciona em duas etapas:
 **2. Ordenação dentro de cada grupo:**
 
 - **Vencidos:** ordenados pelo **score** = `dias_em_atraso × valor`. Quem tem maior combinação de tempo e valor aparece primeiro.
-- **A vencer:** ordenados pelo **vencimento mais próximo**.
+- **A vencer:** ordenados pelo **vencimento mais próximo** — quem vence hoje aparece acima de quem vence em 3 dias.
 
 Exemplo: um título de R$ 200 com 10 dias de atraso (score = 2.000) perde prioridade para um de R$ 500 com 5 dias (score = 2.500).
+
+**Exceção:** um título que **volta** à lista por promessa vencida ou fim do silêncio entra mesmo que o vencimento ainda esteja distante. O compromisso assumido com o cliente vale mais que o corte de "ainda não é urgente".
 
 ---
 
@@ -221,10 +237,16 @@ Quando um cliente tem mais de um título em aberto, o sistema não manda uma men
 
 | Status | Significado |
 |---|---|
-| `aberto` | Pendente — aparece na lista do dia |
-| `pago` | Confirmado como pago — sai da lista |
-| `promessa` | Cliente prometeu pagar em uma data específica — sai da lista |
-| `sem_resposta` | Contato feito, sem retorno — sai da lista |
+| `aberto` | Pendente — aparece na lista do dia quando fica urgente |
+| `pago` | Confirmado como pago — **único status que encerra o título de vez** |
+| `promessa` | Cliente prometeu pagar numa data — sai da lista e **volta nessa data** |
+| `sem_resposta` | Contato feito, sem retorno — sai da lista e **volta em 3 dias** |
+
+> **Cobrança é um processo, não um evento.** Nenhuma dívida some da operação permanentemente sem
+> ter sido paga. Se o cliente prometeu pagar dia 20, o título reaparece na lista no dia 20; se não
+> respondeu, reaparece depois de alguns dias para uma nova tentativa. Quando um título volta, ele
+> vem marcado com o motivo ("prometeu e não pagou" / "sem resposta antes") para você saber que já
+> falou com essa pessoa.
 
 Toda mudança de status é registrada como uma **interação**, que fica salva no histórico do cliente.
 
@@ -289,7 +311,17 @@ supabase/schema.sql
 supabase/rls.sql
 ```
 
-O `schema.sql` cria as três tabelas (`clientes`, `titulos`, `interacoes`) e os índices necessários. O `rls.sql` habilita Row Level Security nelas — **passo obrigatório**, sem ele os dados ficam acessíveis por qualquer pessoa que tenha a URL do projeto e a chave anônima (que ficam visíveis no navegador por design do Supabase).
+Se o banco **já existia** antes desta versão, rode também:
+
+```
+supabase/migration-01-ciclo-operacional.sql
+```
+
+Ele adiciona `silenciado_ate` e `resolvido_em` em `titulos` — colunas que o `schema.sql` não cria
+em bancos existentes (ele usa `create table if not exists`). Sem elas, o card "Recuperado" mostra
+"—" e registrar o resultado de um título falha com erro explícito.
+
+O `schema.sql` cria as três tabelas (`clientes`, `titulos`, `interacoes`) e os índices necessários. O `rls.sql` habilita Row Level Security nelas — **passo obrigatório**: sem ele, qualquer pessoa que obtenha a URL do projeto e a chave anônima do Supabase consegue ler e escrever nas tabelas. Com RLS habilitado e nenhuma política criada, esse acesso fica bloqueado e o app continua funcionando porque fala com o banco pelo servidor, usando a `service_role`.
 
 ### 3. Variáveis de ambiente
 
@@ -299,23 +331,29 @@ Copie o arquivo de exemplo e preencha com os dados do seu projeto Supabase:
 cp .env.local.example .env.local
 ```
 
+São três variáveis, todas obrigatórias:
+
 ```env
-# Supabase → Settings > API
-NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sua-chave-anonima-aqui
+# Supabase → Settings > API > Project URL
+NEXT_PUBLIC_SUPABASE_URL=
 
 # Supabase → Settings > API > Project API keys > service_role
 # NUNCA prefixar com NEXT_PUBLIC_. É a única forma do app acessar o banco
 # depois que RLS está habilitado (passo 2), porque ela ignora RLS por
 # definição e só é usada no servidor — nunca é enviada ao navegador.
-SUPABASE_SERVICE_ROLE_KEY=sua-chave-service-role-aqui
+SUPABASE_SERVICE_ROLE_KEY=
 
-# Senha de acesso ao painel — defina uma senha real antes de qualquer deploy
-# acessível pela internet. Deixar vazio desabilita a proteção.
-APP_PASSWORD=sua-senha-aqui
+# Senha de acesso ao painel — defina uma senha real antes de rodar.
+APP_PASSWORD=
 ```
 
-> Se `APP_PASSWORD` não for definida, o sistema funciona sem autenticação — use isso **apenas** em desenvolvimento local, nunca em produção.
+> A chave anônima (`NEXT_PUBLIC_SUPABASE_ANON_KEY`) **não é mais necessária** — nenhum código a
+> lê desde que o acesso ao banco passou a ser exclusivamente pela `service_role` no servidor.
+
+> **`APP_PASSWORD` em branco:** em desenvolvimento, o app roda sem pedir login (conveniente, e o
+> risco é local). Em produção (`NODE_ENV=production`) o app **se recusa a servir** e responde 503
+> até a variável ser definida — deixar dados de clientes acessíveis sem autenticação por descuido
+> de configuração não é um modo de falha aceitável.
 
 ### 4. Instalar e rodar
 
@@ -332,6 +370,7 @@ Acesse [http://localhost:3000](http://localhost:3000).
 npm run build   # gera build de produção
 npm run start   # serve o build de produção
 npm run lint    # verifica o código com ESLint
+npm run test    # roda os testes automatizados (vitest)
 ```
 
 ---
@@ -357,14 +396,23 @@ src/
 │   ├── Navbar.tsx             # Barra de navegação
 │   └── NavbarWrapper.tsx      # Oculta navbar na tela de login
 ├── lib/
-│   ├── supabase.ts            # Cliente do banco de dados
-│   ├── prioridade.ts          # Algoritmo de priorização e agrupamento por cliente
-│   └── templates.ts           # Templates das mensagens de cobrança (individuais e consolidadas)
+│   ├── supabase.ts            # Cliente do banco de dados (service_role, só no servidor)
+│   ├── prioridade.ts          # Priorização, agrupamento e ciclo de vida do título (estaNaFilaHoje)
+│   ├── recuperacao.ts         # Apuração da receita recuperada
+│   ├── csv-import.ts          # Aliases de coluna, normalização e validação do CSV
+│   ├── format.ts              # Formatação de moeda compartilhada
+│   ├── templates.ts           # Templates das mensagens de cobrança (individuais e consolidadas)
+│   └── *.test.ts              # Testes do domínio (prioridade, recuperacao, csv-import)
 ├── actions/
 │   └── index.ts               # Server actions para registrar envio e atualizar status
 ├── types/
 │   └── index.ts               # Tipos TypeScript compartilhados
 └── proxy.ts                   # Middleware de autenticação
+
+supabase/
+├── schema.sql                            # DDL — banco novo
+├── rls.sql                               # Habilita RLS (rodar depois do schema)
+└── migration-01-ciclo-operacional.sql    # Colunas do ciclo — bancos já existentes
 ```
 
 ---
@@ -400,19 +448,43 @@ Siga estes passos para validar o funcionamento completo do sistema:
 1. Crie um CSV onde as colunas se chamam `sacado`, `celular`, `vl_titulo`, `vencimento` (em vez dos nomes padrão).
 2. Importe e verifique se o sistema detecta as colunas corretamente e importa sem erros.
 
-### Cenário 5 — Limpeza de dados
+### Cenário 5 — Ciclo de vida: nada some sem ser pago
+
+1. Num título da lista, registre **"Prometeu pagar"** com a data de **ontem**.
+2. Recarregue a lista do dia: o título deve **reaparecer**, com a marca "prometeu e não pagou".
+3. Registre **"Sem resposta"**: o título sai da lista. Ele volta sozinho após 3 dias, marcado com
+   "sem resposta antes" (para conferir sem esperar, dá para ajustar `silenciado_ate` no banco).
+4. Registre **"Pago"**: o título sai da lista e **não volta mais**.
+5. Confirme que o card **Recuperado** subiu exatamente o valor daquele título.
+
+### Cenário 6 — Limpeza de dados
 
 1. Acesse **"Dados"** na barra de navegação.
 2. Confirme os números exibidos.
-3. Use **"Limpar títulos concluídos"** e verifique que apenas os em aberto permanecem.
+3. Use **"Limpar títulos pagos"** e verifique que os títulos em promessa/sem resposta **permanecem**
+   — só os pagos devem sumir.
 4. Use **"Limpar tudo"** para resetar o sistema ao estado inicial.
 
 ---
 
 ## Limitações conhecidas do v0
 
-- A autenticação é por senha única (não há usuários individuais).
+- A autenticação é por senha única (não há usuários individuais nem separação por empresa).
 - Não há envio automático de mensagens — o WhatsApp é aberto manualmente.
-- Não há notificações ou lembretes agendados.
+- Não há notificações ou lembretes agendados: a reentrada de um título acontece quando você abre
+  a lista do dia, não por aviso ativo.
 - A exportação de relatórios não está implementada.
 - Não há paginação na lista do dia (todos os títulos urgentes são exibidos de uma vez).
+
+**Sobre a métrica de receita recuperada:**
+
+- Conta apenas títulos marcados como **pago dentro do Atlas**, com a data em que foram marcados.
+  Pagamentos registrados fora do sistema não aparecem.
+- Títulos que já estavam pagos **antes** desta funcionalidade existir ficam de fora, porque não
+  têm data de pagamento registrada. A apuração vale a partir da adoção — datar retroativamente
+  produziria um número inventado.
+- A janela é fixa em 30 dias e não é configurável pela interface.
+- Apagar títulos pagos (em "Dados") remove esses valores da apuração.
+- A mensagem gerada não se adapta a uma promessa quebrada: um título que volta usa o texto da
+  categoria de urgência dele. Para o caso comum (título vencido) o texto funciona; para uma
+  promessa sobre título ainda a vencer, a mensagem fala de vencimento e ignora o combinado.

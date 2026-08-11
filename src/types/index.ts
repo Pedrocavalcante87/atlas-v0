@@ -1,6 +1,9 @@
 export type StatusTitulo = 'aberto' | 'pago' | 'promessa' | 'sem_resposta';
 export type Categoria = 'preventivo' | 'atraso_leve' | 'atraso_longo';
 
+/** Por que um título que tinha saído da fila voltou para ela. */
+export type MotivoReentrada = 'promessa_vencida' | 'silencio_expirado';
+
 export interface Cliente {
   id: string;
   nome: string;
@@ -14,7 +17,12 @@ export interface Titulo {
   valor: number;
   data_vencimento: string;
   status: StatusTitulo;
+  /** Status 'promessa': data combinada. O título volta à fila nessa data. */
   data_promessa: string | null;
+  /** Status 'sem_resposta': fora da fila até esta data (volta nela). */
+  silenciado_ate: string | null;
+  /** Preenchido só quando o título vira 'pago' — fonte da receita recuperada. */
+  resolvido_em: string | null;
   criado_em: string;
   clientes?: Cliente;
 }
@@ -33,6 +41,10 @@ export interface TituloComPrioridade extends Omit<Titulo, 'clientes'> {
   categoria: Categoria;
   diasAtraso: number; // positivo = dias em atraso; negativo = dias até vencer
   mensagem: string;
+  /** null = está na fila pela primeira vez. Preenchido quando o título voltou
+   *  por promessa vencida ou fim do silêncio — quem cobra precisa saber que já
+   *  falou com essa pessoa antes. */
+  motivoReentrada: MotivoReentrada | null;
 }
 
 // Um cliente pode ter vários títulos em aberto ao mesmo tempo — agrupamos

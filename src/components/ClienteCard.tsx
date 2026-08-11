@@ -4,14 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { ClienteAgrupado } from '@/types';
 import { registrarEnvio } from '@/actions';
+import { formatarMoeda } from '@/lib/format';
 import TituloCard from './TituloCard';
 
 interface Props {
   grupo: ClienteAgrupado;
-}
-
-function formatarMoeda(valor: number) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 function linkWhatsApp(telefone: string, mensagem: string) {
@@ -28,11 +25,18 @@ function linkWhatsApp(telefone: string, mensagem: string) {
 export default function ClienteCard({ grupo }: Props) {
   const [enviando, setEnviando] = useState(false);
   const [enviado, setEnviado] = useState(false);
-  const { cliente, titulos, valorTotal, diasAtrasoMax, mensagemConsolidada } = grupo;
+  const { cliente, titulos, valorTotal, categoriaMaisUrgente, mensagemConsolidada } = grupo;
 
-  const isUrgent = diasAtrasoMax > 7;
-  const isModerate = diasAtrasoMax >= 1 && diasAtrasoMax <= 7;
-  const corFaixa = isUrgent ? 'bg-red-500' : isModerate ? 'bg-amber-500' : 'bg-blue-500';
+  // categoriaMaisUrgente já vem calculada por agruparPorCliente() com a mesma
+  // regra de corte de lib/prioridade.ts::categorizarTitulo — reaproveitar em
+  // vez de recomputar a partir de diasAtrasoMax evita duas fontes da mesma
+  // decisão divergirem se o corte mudar (ver ARCHITECTURE.md §6).
+  const corFaixa =
+    categoriaMaisUrgente === 'atraso_longo'
+      ? 'bg-red-500'
+      : categoriaMaisUrgente === 'atraso_leve'
+      ? 'bg-amber-500'
+      : 'bg-blue-500';
 
   async function handleEnviar() {
     setEnviando(true);

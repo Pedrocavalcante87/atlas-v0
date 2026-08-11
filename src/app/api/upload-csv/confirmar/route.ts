@@ -1,32 +1,66 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { validarLinhaRecebida, type LinhaImportacao } from '@/lib/csv-import';
 
-interface LinhaValida {
-  linha: number;
-  nome: string;
-  telefone: string;
-  valor: number;
-  dataVencimento: string;
-}
+const MAX_LINHAS = 20_000;
 
 // ---------------------------------------------------------------------------
 // Confirma uma importação já revisada em /api/upload-csv (prévia). Recebe as
-// linhas já validadas (não recebe o arquivo de novo) e só então grava no banco.
-// Refaz a checagem de duplicata por segurança — dado pode ter mudado entre a
-// prévia e a confirmação (ex: usuário deixou a prévia aberta e importou de
-// outro jeito enquanto isso).
+// linhas que o BROWSER devolveu da prévia — ou seja, dado que não é confiável
+// por si só: um POST autenticado montado manualmente (fora da UI) poderia
+// tentar gravar qualquer coisa nesse body. Por isso cada linha é revalidada
+// estruturalmente aqui (validarLinhaRecebida), com as mesmas regras de forma
+// e faixa da prévia — não apenas "é um array não vazio" (ver ARCHITECTURE.md
+// §9, risco agora fechado).
+//
+// Também refaz a checagem de duplicata por segurança — dado pode ter mudado
+// entre a prévia e a confirmação (ex: usuário deixou a prévia aberta e
+// importou de outro jeito enquanto isso).
 // ---------------------------------------------------------------------------
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
-  const linhas = body?.linhas as LinhaValida[] | undefined;
+  const linhasRecebidas = body?.linhas;
 
-  if (!linhas || !Array.isArray(linhas) || linhas.length === 0) {
+  if (!linhasRecebidas || !Array.isArray(linhasRecebidas) || linhasRecebidas.length === 0) {
     return NextResponse.json({ error: 'Nenhuma linha para importar.' }, { status: 400 });
+  }
+
+  if (linhasRecebidas.length > MAX_LINHAS) {
+    return NextResponse.json(
+      { error: `Excede o limite de ${MAX_LINHAS} linhas por importação.` },
+      { status: 400 },
+    );
+  }
+
+  const linhas: LinhaImportacao[] = [];
+  const rejeicoes: string[] = [];
+  for (const raw of linhasRecebidas) {
+    const validada = validarLinhaRecebida(raw);
+    if (validada.ok) {
+      linhas.push(validada.linha);
+    } else {
+      // A prévia aplica exatamente esta mesma validação antes de contar a linha
+      // como "pronta pra importar", então chegar aqui significa que o payload
+      // não veio da prévia. Reportar o motivo, não só o número.
+      const numero = typeof raw?.linha === 'number' ? `Linha ${raw.linha}` : 'Linha desconhecida';
+      rejeicoes.push(`${numero}: ${validada.motivo}`);
+    }
+  }
+
+  if (linhas.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          'Nenhuma linha passou na revalidação — os dados recebidos não têm o formato esperado.\n\n' +
+          rejeicoes.join('\n'),
+      },
+      { status: 400 },
+    );
   }
 
   let count = 0;
   let duplicatas = 0;
-  const importErrors: string[] = [];
+  const importErrors: string[] = [...rejeicoes];
 
   for (const l of linhas) {
     const { data: cliente, error: errCliente } = await supabase
