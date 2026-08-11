@@ -186,8 +186,9 @@ async function inserirComRetentativa(lote: TituloParaInserir[]): Promise<Resulta
       return { gravados, duplicatasDeCorrida: lote.length - gravados };
     }
 
-    const conflito = !r.indisponivel && r.detalhe.includes(CONFLITO_UNICIDADE);
-    if (!conflito || tentativa >= MAX_TENTATIVAS_CONFLITO) {
+    // Pelo CÓDIGO, não pela mensagem: o texto do Postgres é "duplicate key
+    // value violates unique constraint ..." e não contém o número.
+    if (r.codigo !== CONFLITO_UNICIDADE) {
       return {
         gravados,
         duplicatasDeCorrida: 0,
@@ -196,11 +197,13 @@ async function inserirComRetentativa(lote: TituloParaInserir[]): Promise<Resulta
     }
 
     // Alguém gravou parte disto entre a nossa checagem e agora. Reconsulta e
-    // reenvia só o que ainda falta — o lote encolhe a cada rodada, então o
-    // laço termina.
-    let existentes: TituloExistente[];
+    // reenvia só o que ainda falta — o lote encolhe a cada rodada.
+    let restantes: TituloParaInserir[];
     try {
-      existentes = await titulosAbertosDe([...new Set(pendentes.map((t) => t.cliente_id))]);
+      restantes = removerJaExistentes(
+        pendentes,
+        await titulosAbertosDe([...new Set(pendentes.map((t) => t.cliente_id))]),
+      );
     } catch {
       return {
         gravados,
@@ -212,22 +215,64 @@ async function inserirComRetentativa(lote: TituloParaInserir[]): Promise<Resulta
       };
     }
 
-    const restantes = removerJaExistentes(pendentes, existentes);
-
     if (restantes.length === 0) {
       return { gravados, duplicatasDeCorrida: lote.length - gravados };
     }
-    if (restantes.length === pendentes.length) {
-      // Conflitou mas nada apareceu como existente: não é a corrida que
-      // imaginamos. Parar em vez de repetir a mesma requisição para sempre.
-      return {
-        gravados,
-        duplicatasDeCorrida: 0,
-        falha: { indisponivel: false, mensagem: r.mensagem },
-      };
+
+    const travou = restantes.length === pendentes.length;
+    if (travou || tentativa >= MAX_TENTATIVAS_CONFLITO) {
+      return conciliar(lote, gravados, r.mensagem);
     }
     pendentes = restantes;
   }
+}
+
+/**
+ * Última palavra sobre o que aconteceu, quando as tentativas se esgotam.
+ *
+ * Sem isto o relatório mentia para o lado oposto do bug original: com quatro
+ * importações simultâneas de 120 linhas, as três perdedoras diziam "0
+ * importados, 20 duplicatas, 100 NÃO GRAVADAS" — quando as 120 estavam todas no
+ * banco, gravadas pela vencedora. O usuário concluiria que faltou dado e ficaria
+ * reimportando atrás de algo que já existe.
+ *
+ * Quem sabe a verdade é o banco. Uma linha que já está lá é duplicata, não
+ * falha, pouco importa qual requisição a gravou. Só o que realmente não existe
+ * é reportado como não gravado.
+ */
+async function conciliar(
+  lote: TituloParaInserir[],
+  gravados: number,
+  mensagemDoConflito: string,
+): Promise<ResultadoLote> {
+  let faltando: TituloParaInserir[];
+  try {
+    faltando = removerJaExistentes(
+      lote,
+      await titulosAbertosDe([...new Set(lote.map((t) => t.cliente_id))]),
+    );
+  } catch {
+    return {
+      gravados,
+      duplicatasDeCorrida: 0,
+      falha: {
+        indisponivel: true,
+        mensagem: 'Não foi possível confirmar o que foi gravado após um conflito.',
+      },
+    };
+  }
+
+  const duplicatasDeCorrida = lote.length - gravados - faltando.length;
+
+  // Tudo do lote existe: a importação está completa, mesmo que outra requisição
+  // é que tenha gravado. Não há nada de errado para reportar.
+  if (faltando.length === 0) return { gravados, duplicatasDeCorrida };
+
+  return {
+    gravados,
+    duplicatasDeCorrida,
+    falha: { indisponivel: false, mensagem: mensagemDoConflito },
+  };
 }
 
 export async function POST(request: NextRequest) {

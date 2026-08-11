@@ -66,7 +66,24 @@ export type MontarConsulta<T> = (sinal: AbortSignal) => PromiseLike<RespostaSupa
 
 export type Resultado<T> =
   | { ok: true; data: T; count: number | null }
-  | { ok: false; indisponivel: boolean; mensagem: string; detalhe: string };
+  | {
+      ok: false;
+      indisponivel: boolean;
+      mensagem: string;
+      detalhe: string;
+      /**
+       * SQLSTATE devolvido pelo Postgres, quando houve um ('23505', '23514'…).
+       * Vazio em falha de rede/timeout — é o mesmo discriminador que
+       * `ehFalhaDeInfraestrutura` usa.
+       *
+       * Propagado porque quem chama às vezes precisa distinguir UM erro
+       * específico, e a única forma correta é pelo código: a mensagem é texto
+       * humano ("duplicate key value violates unique constraint ...") e não
+       * contém o número. Procurar o código dentro da mensagem não funciona —
+       * já não funcionou uma vez.
+       */
+      codigo: string;
+    };
 
 /** Lançada quando uma leitura não pôde ser respondida. Nunca vire um zero. */
 export class SupabaseIndisponivelError extends Error {
@@ -135,6 +152,7 @@ export async function consultar<T>(
       indisponivel,
       mensagem: mensagemParaUsuario(indisponivel),
       detalhe: error.message,
+      codigo: error.code ?? '',
     };
   }
 

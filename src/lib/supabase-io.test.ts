@@ -78,6 +78,35 @@ describe('consultar', () => {
     }
   });
 
+  it('propaga o SQLSTATE para quem precisa distinguir UM erro específico', async () => {
+    // A importação precisa reconhecer 23505 ("alguém já gravou") e tratá-lo
+    // como duplicata, não como falha. A primeira versão procurava o número
+    // dentro de `detalhe` e nunca achava: a mensagem do Postgres é texto
+    // humano e não contém o código. O caminho de conflito ficou morto, e as
+    // requisições perdedoras relatavam 100 linhas "não gravadas" que estavam
+    // no banco. Discriminar por código é a única forma correta.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const conflito = {
+      message: 'duplicate key value violates unique constraint "idx_titulos_aberto_unico"',
+      code: '23505',
+    };
+    const r = await consultar(responde({ error: conflito }), 'insert');
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.codigo).toBe('23505');
+      expect(r.indisponivel).toBe(false);
+      expect(r.detalhe).not.toContain('23505');
+    }
+  });
+
+  it('código vazio em falha de rede', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const r = await consultar(responde({ error: erroDeRede }), 'teste');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.codigo).toBe('');
+  });
+
   it('aplica um AbortSignal à consulta', async () => {
     let recebido: AbortSignal | null = null;
     await consultar(async (sinal) => {
