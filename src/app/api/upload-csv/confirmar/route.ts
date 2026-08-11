@@ -79,6 +79,10 @@ function montarMensagem(r: Omit<Relatorio, 'message'>): string {
   return (
     `${r.count} título(s) importado(s)` +
     (r.duplicatas > 0 ? ` · ${r.duplicatas} duplicata(s) ignorada(s)` : '') +
+    // Um erro de banco interrompe a importação, então pode haver linhas que
+    // nem chegaram a ser tentadas. Omitir esse número deixaria "3 importados ·
+    // 1 erro" parecer um desfecho pequeno quando 400 linhas ficaram de fora.
+    (r.naoGravadas > 0 ? ` · ${r.naoGravadas} não gravado(s)` : '') +
     (r.errors.length > 0 ? ` · ${r.errors.length} erro(s)` : '')
   );
 }
@@ -342,16 +346,17 @@ export async function POST(request: NextRequest) {
     duplicatasDeCorrida += r.duplicatasDeCorrida;
 
     if (r.falha) {
+      // Para na primeira falha, seja de rede ou do banco. Rede: os próximos
+      // lotes falhariam igual, só que mais devagar — era isso que fazia a
+      // importação levar 78s e culpar as linhas do CSV. Banco: todas as linhas
+      // já passaram por `validarLinhaRecebida`, então uma recusa aqui indica
+      // algo sistêmico, e insistir tende a repetir o mesmo erro.
       errors.push(
         `Linhas ${lote[0].linha}–${lote[lote.length - 1].linha}: ` +
-        `${lote.length - r.gravados} título(s) não gravados — ${r.falha.mensagem}`,
+        `${lote.length - r.gravados} título(s) não gravados — ${r.falha.mensagem} ` +
+        `A importação foi interrompida aqui.`,
       );
-      if (r.falha.indisponivel) {
-        // Dependência fora: os próximos lotes falhariam igual, só que mais
-        // devagar. Era exatamente isso que fazia a importação levar 78s e
-        // devolver um erro por linha, como se o CSV estivesse errado.
-        indisponivel = true;
-      }
+      indisponivel = r.falha.indisponivel;
       break;
     }
   }
