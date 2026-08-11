@@ -276,6 +276,41 @@ Decidido e implementado; mudar qualquer uma exige justificativa explícita, não
   construção — não confie em manter duas listas de regras sincronizadas na mão.
 - **`lib/supabase.ts` é servidor-only e usa `service_role`.** Não criar política de RLS nem usar a
   chave anônima no client — isso quebraria o modelo de segurança atual (ver §Banco de dados).
+- **Todo acesso ao banco passa por `lib/supabase-io.ts`** (`ler` / `lerPaginado` / `gravar`). Não é
+  camada de repositório — não conhece tabela nem regra, e a query continua sendo montada com
+  `lib/supabase.ts` direto. Ele só carrega a política: prazo, classificação de falha e paginação.
+  Ver §Leitura de listas e §Falha de dependência.
+
+## Leitura de listas — o PostgREST corta em 1000 linhas
+
+Fato medido neste projeto (1149 títulos não pagos): um `select` sem paginar devolveu **1000**
+linhas e a soma de "valor em aberto" saiu **R$ 137.287,50 menor** que a real, com HTTP 200 e
+nenhum aviso. Resposta truncada é indistinguível de resposta completa.
+
+**Toda leitura que alimenta soma de dinheiro, checagem de duplicata ou a lista do dia usa
+`lerPaginado`.** Não é otimização, é correção: sem isso o sistema subnotifica dívida e insere
+título repetido conforme o negócio cresce. `ler` (sem paginar) só serve para `count`/`head` e para
+buscar UMA linha.
+
+## Falha de dependência — o que não pode acontecer
+
+Invariante do produto, não preferência de estilo:
+
+> Se o sistema não sabe o estado real do banco, ele não pode inventar um estado que pareça válido.
+
+Na prática, uma falha de infraestrutura **nunca** pode virar zero cliente, zero título, R$ 0,00,
+lista vazia ou sucesso aparente — e **nunca** pode ser apresentada ao usuário como problema no
+dado que ele enviou. Foi exatamente isso que aconteceu: `/api/dados` respondia 200 com o banco
+vazio enquanto havia dados, e a importação culpava linhas do CSV por uma queda de rede.
+
+- Leitura que falha ⇒ exceção ⇒ 503 (API) ou tela de indisponibilidade (página). Nunca `?? 0`.
+- `ehFalhaDeInfraestrutura` distingue "não falei com o banco" de "o banco recusou" pelo `code`
+  (SQLSTATE presente = erro do banco; vazio = infraestrutura). Sem código conta como
+  infraestrutura — direção conservadora de propósito.
+- **Escrita não tem retry, e isso é decisão.** O `postgrest-js` só repete GET/HEAD/OPTIONS;
+  reenviar um `insert` cuja resposta se perdeu duplicaria um título. Não reintroduza retry de
+  escrita. A recuperação é reimportar — a checagem de duplicata torna isso idempotente.
+- Prazos em `lib/supabase-io.ts`: 8s leitura, 15s escrita. Sem eles o padrão do undici é 300s.
 
 ## Fora de escopo por decisão (não implementar sem pedido explícito)
 
@@ -287,10 +322,12 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
 - IA para priorização ou geração de mensagem. Não há volume de dado para aprender nada, e a
   fórmula atual não foi provada insuficiente.
 - Notificações/lembretes agendados, exportação de relatórios, edição de cliente/título pela UI,
-  integrações com ERP, paginação da lista do dia.
+  integrações com ERP, paginação **de UI** da lista do dia (quantos cards mostrar por vez — não
+  confundir com paginar a *leitura*, que passou a ser obrigatória, ver §Leitura de listas).
 - Testes de componente React e E2E em CI.
-- Batching/transação na importação de CSV e limite explícito na query da home — conhecidos e
-  aceitos no volume atual (ver ARCHITECTURE.md §10).
+- ~~Batching na importação de CSV~~ — **feito**: a confirmação grava em lote (ver ARCHITECTURE.md
+  §4.2). Transação de verdade continua fora: o PostgREST não expõe transação multi-requisição, e a
+  recuperação hoje é por reimportação idempotente, não por rollback.
 
 ## Banco de dados / Supabase
 

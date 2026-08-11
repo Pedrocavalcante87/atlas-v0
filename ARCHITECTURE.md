@@ -48,6 +48,7 @@ schema exige localizar todos os pontos de chamada manualmente (ver §7).
 | **Mutação de estado** | `src/actions/index.ts` | Server Actions: registrar envio, atualizar status de título |
 | **Administração** | `src/app/dados/page.tsx`, `src/app/api/dados/route.ts` | Estatísticas agregadas + limpeza destrutiva de dados (protegida por frase de confirmação) |
 | **Acesso a dados** | `src/lib/supabase.ts` | Client Supabase único (service_role), lazy-init via Proxy |
+| **Política de I/O** | `src/lib/supabase-io.ts` | Prazo (8s leitura / 15s escrita), classificação infra × banco, paginação de listas, e leitura que lança em vez de devolver vazio |
 | **Layout / navegação** | `src/app/layout.tsx`, `src/components/Navbar.tsx`, `src/components/NavbarWrapper.tsx` | Casca visual, esconde navbar no login |
 
 Os módulos com limite de domínio bem definido e sem acesso direto ao banco são **priorização**
@@ -56,9 +57,16 @@ Os módulos com limite de domínio bem definido e sem acesso direto ao banco sã
 `lib/recuperacao.ts` é misto de propósito — a apuração (`somarRecuperado`,
 `inicioJanelaRecuperacao`) é pura e testada; só `totalRecuperado` toca o banco, e é fino.
 
-**Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`.
-`lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota, Server Action ou componente
-React tem cobertura — a verificação deles é manual (`npm run dev`) ou via E2E ad-hoc.
+`lib/supabase-io.ts` é a única exceção deliberada ao "não existe camada de acesso a dados" (§12):
+ele **não** conhece tabela, coluna nem regra de negócio, e quem chama continua montando a query com
+`lib/supabase.ts` diretamente. O que ele centraliza é política — prazo, o que conta como "o banco
+está fora", e paginação. Existe porque a alternativa (repetir `if (error)` em cada chamada) é
+justamente o que falhou: `?? 0` espalhado por `/api/dados` transformava apagão em R$ 0,00.
+
+**Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`,
+`supabase-io.test.ts`. `lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
+Server Action ou componente React tem cobertura — a verificação deles é manual (`npm run dev`) ou
+via E2E ad-hoc.
 
 ---
 
@@ -134,12 +142,44 @@ Passo 1 — prévia (somente leitura, nada é gravado):
     → responde JSON com `linhasValidas` + relatório (breakdown, colunas detectadas, erros)
   upload/page.tsx guarda `linhasValidas` em estado do componente (useState, no browser)
 
-Passo 2 — confirmação (grava no banco):
+Passo 2 — confirmação (grava no banco, EM LOTE):
   upload/page.tsx --POST--> /api/upload-csv/confirmar
     body: { linhas: linhasValidas }   ← as MESMAS linhas devolvidas no passo 1, reenviadas
-    → para cada linha: upsert em `clientes` (chave: telefone) → checa duplicata de novo → insert em `titulos`
-    → responde JSON com relatório final
+    → revalida cada linha (validarLinhaRecebida)
+    → upsert de clientes em lotes de 500 (chave: telefone), deduplicados por telefone
+    → lê títulos 'aberto' dos clientes envolvidos, em lotes de 100 ids, paginado
+    → planejarImportacao decide EM MEMÓRIA quem inserir e quem é duplicata
+    → insert de títulos em lotes de 500
+    → responde { resultado, count, duplicatas, naoGravadas, errors, message }
 ```
+
+**O número de requisições não depende mais de N.** Antes eram 3 idas ao banco por linha (upsert,
+consulta de duplicata, insert): 90 linhas custavam 270 requisições e 67s, com crescimento linear,
+num endpoint que aceita até 20.000 linhas. Medido depois: 30 linhas 1,2s · 90 linhas 0,8s ·
+300 linhas 1,5s. A fórmula passou a ser `ceil(U/500) + ceil(U/100) + ceil(I/500)` requisições,
+com U = clientes únicos e I = títulos a inserir.
+
+A decisão de quem inserir vive em `lib/csv-import.ts::planejarImportacao` — domínio puro, coberto
+por teste. Duas regras que a versão em lote precisa manter e que os testes protegem:
+
+1. **Duplicata dentro do próprio arquivo.** O loop antigo acertava por acidente de ordem (a
+   segunda linha igual consultava o banco depois de a primeira ter sido inserida). Agora a chave
+   de cada título aceito entra num conjunto em memória.
+2. **Telefone repetido no mesmo `upsert`** derruba o comando inteiro com SQLSTATE 21000
+   ("ON CONFLICT DO UPDATE command cannot affect row a second time"). Deduplicar por telefone é
+   obrigatório, não otimização.
+
+**Contrato de resposta** — `resultado` é `completo` | `parcial` | `indisponivel`. HTTP 200 para os
+dois primeiros (rejeição de linha por dado ruim é resposta legítima de import em lote); **503**
+para `indisponivel`. Como a gravação não é transacional, um 503 pode vir com `count > 0`: parte
+entrou antes da queda. A resposta diz quantos, e reimportar o mesmo arquivo é seguro — a checagem
+de duplicata torna a operação idempotente. Verificado de ponta a ponta: 500 de 600 gravados numa
+queda injetada, reimportação inseriu exatamente os 100 que faltavam e contou 500 duplicatas.
+
+Sequela conhecida e benigna de uma importação interrompida: os clientes do lote são criados antes
+dos títulos, então pode sobrar cliente sem título nenhum. Ele não aparece em lugar nenhum da UI
+(tudo parte de `titulos`), só infla a contagem de clientes em `/dados`, e a reimportação o
+reaproveita pelo telefone.
 
 O dado que será persistido sai do servidor (passo 1), passa pelo browser e volta ao servidor
 (passo 2) — por isso **não é confiável**. Os dois passos aplicam a mesma
@@ -169,6 +209,16 @@ dados/page.tsx (Client Component)
 ```
 Único fluxo do sistema em que a UI é Client Component chamando uma API Route via `fetch` em vez
 de Server Component + Server Action.
+
+**`GET /api/dados` responde 200 com as estatísticas ou 503 `{ error, indisponivel: true }`.** Não
+existe resposta intermediária: se qualquer uma das leituras falhar, a rota inteira devolve 503. Sete
+números certos e um errado, exibidos juntos como se todos fossem verdade, é pior do que dizer que a
+tela está indisponível. A única exceção é `valorRecuperado`, que continua podendo vir `null` (UI
+mostra "—") quando o banco responde que a coluna `resolvido_em` não existe — isso é limitação
+conhecida de schema, não ausência de informação.
+
+Enquanto o estado do banco é desconhecido, a tela esconde as estatísticas **e a zona de perigo**:
+era possível ver "0 títulos" por falha de leitura e clicar em "Limpar tudo" logo abaixo.
 
 ---
 
@@ -335,10 +385,19 @@ deles.
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
 - ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `lib/prioridade.ts` e
   `lib/csv-import.ts` (as duas áreas de maior risco financeiro/dado — score, categorização,
-  parsing de valor/data/telefone) agora têm suíte de testes (`vitest`, `npm run test`, 52 casos).
+  parsing de valor/data/telefone) agora têm suíte de testes (`vitest`, `npm run test`, 119 casos,
+  incluindo o planejamento da importação em lote e a classificação de falha de I/O).
   Ainda sem cobertura: Server Actions (`actions/index.ts`), as rotas de API como integração
   (só testadas manualmente), e nenhum componente React. Mudar o corte de "7 dias" hoje quebraria
   um teste se divergisse entre os módulos que o usam — antes não haveria nenhum sinal.
+- **A confirmação da importação não é transacional.** O PostgREST não expõe transação entre
+  requisições, então uma queda no meio deixa parte dos títulos gravados. Isso é tolerável só porque
+  a reimportação é idempotente (checagem de duplicata) e a resposta diz exatamente quantos entraram.
+  Se algum dia isso precisar de rollback de verdade, o caminho é uma função RPC no Postgres, que é
+  mudança de schema — não ajuste incremental.
+- **A lista do dia renderiza todos os clientes da fila de uma vez.** Com 1149 títulos em base de
+  teste, a home levou ~3,8s para montar 734 cards — o custo agora é render, não banco. Paginação de
+  UI continua fora de escopo, mas passa a ser o próximo gargalo real de percepção.
 - `upload/page.tsx` tem ~500 linhas, misturando estado de formulário, chamadas de rede e três
   componentes de apresentação (`PreviewReport`, `ConfirmedReport`, `BreakdownRow`) no mesmo arquivo.
   Não mexido nesta rodada — funcional, não é o gargalo atual.
