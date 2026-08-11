@@ -43,8 +43,11 @@ interface PreviewResult {
 }
 
 interface ConfirmResult {
+  /** completo = tudo gravado; parcial = algo foi recusado; indisponivel = o banco não respondeu. */
+  resultado: 'completo' | 'parcial' | 'indisponivel';
   count: number;
   duplicatas: number;
+  naoGravadas: number;
   errors: string[];
   message: string;
 }
@@ -116,12 +119,15 @@ export default function UploadPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ linhas: result.linhasValidas }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => null);
 
-    if (!res.ok) {
-      setError(data.error ?? 'Erro ao confirmar importação.');
-    } else {
+    // 503 com `resultado` é indisponibilidade da dependência, não CSV inválido:
+    // o relatório existe e pode até ter linhas gravadas antes da queda, então
+    // vai para a tela de resultado (em vermelho), não para o erro de formulário.
+    if (data?.resultado) {
       setConfirmResult(data);
+    } else if (!res.ok) {
+      setError(data?.error ?? 'Erro ao confirmar importação.');
     }
     setConfirmando(false);
   }
@@ -456,20 +462,52 @@ function ConfirmedReport({
   onNovo: () => void;
   onVerLista: () => void;
 }) {
+  // Um banner verde por cima de "3 importados · 7 erros" foi exatamente o que
+  // escondeu uma queda de rede durante o teste real. A cor agora segue o
+  // desfecho, e a indisponibilidade tem um texto próprio: o problema não é o
+  // arquivo do usuário.
+  const estilo = {
+    completo: {
+      caixa: 'bg-emerald-50 border-emerald-200',
+      titulo: 'text-emerald-800',
+      texto: 'text-emerald-700',
+      icone: '✅',
+      rotulo: 'Importação concluída',
+    },
+    parcial: {
+      caixa: 'bg-amber-50 border-amber-200',
+      titulo: 'text-amber-800',
+      texto: 'text-amber-700',
+      icone: '⚠️',
+      rotulo: 'Importação concluída em parte',
+    },
+    indisponivel: {
+      caixa: 'bg-red-50 border-red-200',
+      titulo: 'text-red-800',
+      texto: 'text-red-700',
+      icone: '❌',
+      rotulo: 'Importação interrompida — banco de dados indisponível',
+    },
+  }[result.resultado];
+
   return (
     <div className="space-y-4">
-      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-start gap-2.5 text-sm">
-        <span className="shrink-0 mt-0.5">&#9989;</span>
+      <div className={`${estilo.caixa} border rounded-xl p-3.5 flex items-start gap-2.5 text-sm`}>
+        <span className="shrink-0 mt-0.5">{estilo.icone}</span>
         <div>
-          <p className="text-emerald-800 font-semibold">Importação concluída</p>
-          <p className="text-emerald-700 text-xs mt-0.5">{result.message}</p>
+          <p className={`${estilo.titulo} font-semibold`}>{estilo.rotulo}</p>
+          <p className={`${estilo.texto} text-xs mt-0.5`}>{result.message}</p>
         </div>
       </div>
 
       {result.errors.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100">
-            <p className="text-sm font-semibold text-slate-700">Erros durante a gravação</p>
+            <p className="text-sm font-semibold text-slate-700">
+              {result.resultado === 'indisponivel'
+                ? 'O que aconteceu'
+                : 'Erros durante a gravação'}
+            </p>
           </div>
           {result.errors.map((err, i) => (
             <div key={i} className="px-5 py-3 border-b border-slate-50 last:border-0 text-sm text-red-600">
@@ -477,6 +515,14 @@ function ConfirmedReport({
             </div>
           ))}
         </div>
+      )}
+
+      {result.resultado === 'indisponivel' && (
+        <p className="text-xs text-slate-500 leading-relaxed px-1">
+          Nenhum dado do arquivo foi perdido. Assim que a conexão voltar, importe o mesmo arquivo
+          de novo: os títulos que chegaram a ser gravados serão reconhecidos como duplicata e não
+          entrarão duas vezes.
+        </p>
       )}
 
       <div className="flex gap-3">
@@ -492,7 +538,7 @@ function ConfirmedReport({
           onClick={onNovo}
           className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold py-3 rounded-xl transition-colors"
         >
-          Importar outro arquivo
+          {result.resultado === 'indisponivel' ? 'Tentar de novo' : 'Importar outro arquivo'}
         </button>
       </div>
     </div>
