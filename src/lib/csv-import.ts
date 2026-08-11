@@ -222,3 +222,132 @@ export function validarLinhaRecebida(input: unknown): ResultadoValidacao {
 
   return { ok: true, linha: { linha, nome, telefone, valor, dataVencimento } };
 }
+
+// ---------------------------------------------------------------------------
+// Planejamento da gravação em lote
+//
+// A confirmação da importação fazia 3 idas ao banco POR LINHA (upsert cliente
+// → consulta duplicata → insert título): 90 linhas = 270 requisições, ~67s
+// medidos, crescimento linear. As funções abaixo movem TODA a decisão para a
+// memória, para que a rota precise de um punhado de requisições em lote em vez
+// de três por linha.
+//
+// Elas são puras de propósito: é aqui que moram as regras que, se quebrarem,
+// duplicam dado financeiro — então é aqui que os testes conseguem alcançá-las.
+// ---------------------------------------------------------------------------
+
+/** Um título já existente no banco, no formato mínimo para detectar duplicata. */
+export interface TituloExistente {
+  cliente_id: string;
+  valor: number;
+  data_vencimento: string;
+}
+
+/** Título pronto para inserção, com a linha de origem para relatar erro. */
+export interface TituloParaInserir {
+  linha: number;
+  cliente_id: string;
+  valor: number;
+  data_vencimento: string;
+}
+
+export interface PlanoDeImportacao {
+  aInserir: TituloParaInserir[];
+  duplicatas: number;
+  /** Linhas cujo cliente não voltou do upsert — nunca devem sumir caladas. */
+  semCliente: LinhaImportacao[];
+}
+
+/**
+ * Chave de identidade de um título em aberto: mesmo cliente, mesmo valor,
+ * mesmo vencimento. É a MESMA regra que o loop linha-a-linha aplicava via
+ * `.eq('cliente_id',…).eq('valor',…).eq('data_vencimento',…).eq('status','aberto')`.
+ *
+ * `Number(valor)` normaliza os dois lados antes de comparar: o Postgres devolve
+ * `numeric` como número JSON (2850.00 vira 2850, 1200.50 vira 1200.5) e o CSV
+ * passa por `parseFloat` — sem normalizar, "2850.00" e 2850 gerariam chaves
+ * diferentes e o título entraria duplicado.
+ */
+function chaveDoTitulo(clienteId: string, valor: number, dataVencimento: string): string {
+  return `${clienteId}|${Number(valor)}|${dataVencimento}`;
+}
+
+/**
+ * Clientes únicos por telefone, prontos para um único upsert em lote.
+ *
+ * Deduplicar é OBRIGATÓRIO, não uma otimização: mandar o mesmo telefone duas
+ * vezes no mesmo `upsert` faz o Postgres recusar o comando inteiro com
+ * "ON CONFLICT DO UPDATE command cannot affect row a second time" (SQLSTATE
+ * 21000, confirmado contra o banco real) — ou seja, um CSV com duas linhas do
+ * mesmo cliente derrubaria o lote todo.
+ *
+ * Vence o ÚLTIMO nome visto, preservando o comportamento do loop anterior, em
+ * que cada linha sobrescrevia o nome do cliente ao passar pelo upsert.
+ */
+export function clientesParaUpsert(
+  linhas: LinhaImportacao[],
+): { nome: string; telefone: string }[] {
+  const porTelefone = new Map<string, string>();
+  for (const l of linhas) porTelefone.set(l.telefone, l.nome);
+  return [...porTelefone].map(([telefone, nome]) => ({ nome, telefone }));
+}
+
+/**
+ * Decide, em memória, quais títulos inserir e quais já existem.
+ *
+ * Reproduz exatamente a semântica do loop sequencial anterior, incluindo a
+ * parte que era fácil perder na conversão para lote: **duplicatas dentro do
+ * próprio arquivo**. No loop antigo isso funcionava por acidente de ordem — a
+ * segunda linha idêntica consultava o banco depois de a primeira já ter sido
+ * inserida e a encontrava. Aqui o mesmo efeito é explícito: a chave de cada
+ * título aceito entra no conjunto `vistos`, então a próxima linha igual conta
+ * como duplicata em vez de virar um segundo registro.
+ *
+ * Preserva também o recorte de `status = 'aberto'`: `titulosExistentes` deve
+ * vir filtrado por isso. Um título já pago não bloqueia a reimportação — é uma
+ * cobrança nova, não uma repetição.
+ */
+export function planejarImportacao(
+  linhas: LinhaImportacao[],
+  clienteIdPorTelefone: Map<string, string>,
+  titulosExistentes: TituloExistente[],
+): PlanoDeImportacao {
+  const vistos = new Set(
+    titulosExistentes.map((t) => chaveDoTitulo(t.cliente_id, t.valor, t.data_vencimento)),
+  );
+
+  const aInserir: TituloParaInserir[] = [];
+  const semCliente: LinhaImportacao[] = [];
+  let duplicatas = 0;
+
+  for (const l of linhas) {
+    const clienteId = clienteIdPorTelefone.get(l.telefone);
+    if (!clienteId) {
+      semCliente.push(l);
+      continue;
+    }
+
+    const chave = chaveDoTitulo(clienteId, l.valor, l.dataVencimento);
+    if (vistos.has(chave)) {
+      duplicatas++;
+      continue;
+    }
+
+    vistos.add(chave);
+    aInserir.push({
+      linha: l.linha,
+      cliente_id: clienteId,
+      valor: l.valor,
+      data_vencimento: l.dataVencimento,
+    });
+  }
+
+  return { aInserir, duplicatas, semCliente };
+}
+
+/** Quebra uma lista em lotes de no máximo `tamanho`. */
+export function emLotes<T>(itens: T[], tamanho: number): T[][] {
+  const lotes: T[][] = [];
+  for (let i = 0; i < itens.length; i += tamanho) lotes.push(itens.slice(i, i + tamanho));
+  return lotes;
+}

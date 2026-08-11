@@ -6,6 +6,11 @@ import {
   detectarMapeamentoColunas,
   dataEmFaixaRazoavel,
   validarLinhaRecebida,
+  clientesParaUpsert,
+  planejarImportacao,
+  emLotes,
+  type LinhaImportacao,
+  type TituloExistente,
 } from './csv-import';
 
 describe('normalizarValor', () => {
@@ -245,5 +250,183 @@ describe('paridade entre prévia e confirmação', () => {
     const resultado = validarLinhaRecebida(linha);
     expect(resultado.ok).toBe(false);
     if (!resultado.ok) expect(resultado.motivo).toMatch(/telefone/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gravação em lote
+//
+// Estas funções substituíram um loop que fazia 3 idas ao banco por linha. O
+// loop acertava a deduplicação por ACIDENTE DE ORDEM: a segunda linha idêntica
+// consultava o banco depois de a primeira já ter sido inserida, e a encontrava.
+// Em lote não existe esse acidente — a regra virou explícita, e é isto que os
+// testes abaixo protegem. Se algum deles cair, o sintoma em produção é título
+// financeiro duplicado.
+// ---------------------------------------------------------------------------
+
+function linha(
+  n: number,
+  telefone: string,
+  valor: number,
+  dataVencimento = '2026-03-10',
+  nome = `Cliente ${n}`,
+): LinhaImportacao {
+  return { linha: n, nome, telefone, valor, dataVencimento };
+}
+
+describe('clientesParaUpsert', () => {
+  it('deduplica por telefone — mandar o mesmo duas vezes derruba o upsert inteiro (SQLSTATE 21000)', () => {
+    const clientes = clientesParaUpsert([
+      linha(2, '5511900000001', 100),
+      linha(3, '5511900000001', 200),
+      linha(4, '5511900000002', 300),
+    ]);
+    expect(clientes).toHaveLength(2);
+    expect(clientes.map((c) => c.telefone).sort()).toEqual(['5511900000001', '5511900000002']);
+  });
+
+  it('vence o último nome visto, como fazia o upsert linha a linha', () => {
+    const clientes = clientesParaUpsert([
+      linha(2, '5511900000001', 100, '2026-03-10', 'Nome Antigo'),
+      linha(3, '5511900000001', 200, '2026-03-10', 'Nome Novo'),
+    ]);
+    expect(clientes).toEqual([{ telefone: '5511900000001', nome: 'Nome Novo' }]);
+  });
+
+  it('lista vazia não gera lote', () => {
+    expect(clientesParaUpsert([])).toEqual([]);
+  });
+});
+
+describe('planejarImportacao', () => {
+  const mapa = new Map([
+    ['5511900000001', 'cli-1'],
+    ['5511900000002', 'cli-2'],
+  ]);
+
+  it('insere o que não existe', () => {
+    const plano = planejarImportacao([linha(2, '5511900000001', 100)], mapa, []);
+    expect(plano.aInserir).toHaveLength(1);
+    expect(plano.aInserir[0]).toMatchObject({ linha: 2, cliente_id: 'cli-1', valor: 100 });
+    expect(plano.duplicatas).toBe(0);
+  });
+
+  it('REGRESSÃO: duas linhas idênticas no mesmo arquivo geram 1 inserção e 1 duplicata', () => {
+    const plano = planejarImportacao(
+      [linha(2, '5511900000001', 100), linha(3, '5511900000001', 100)],
+      mapa,
+      [],
+    );
+    expect(plano.aInserir).toHaveLength(1);
+    expect(plano.duplicatas).toBe(1);
+  });
+
+  it('REGRESSÃO: título que já existe no banco vira duplicata, não segunda cobrança', () => {
+    const existentes: TituloExistente[] = [
+      { cliente_id: 'cli-1', valor: 100, data_vencimento: '2026-03-10' },
+    ];
+    const plano = planejarImportacao([linha(2, '5511900000001', 100)], mapa, existentes);
+    expect(plano.aInserir).toHaveLength(0);
+    expect(plano.duplicatas).toBe(1);
+  });
+
+  it('REGRESSÃO: reimportar o arquivo inteiro não insere nada de novo', () => {
+    const arquivo = [
+      linha(2, '5511900000001', 100),
+      linha(3, '5511900000002', 250.5),
+      linha(4, '5511900000001', 80, '2026-04-01'),
+    ];
+    const primeira = planejarImportacao(arquivo, mapa, []);
+    expect(primeira.aInserir).toHaveLength(3);
+
+    // O que a primeira importação gravou passa a existir no banco.
+    const agoraNoBanco: TituloExistente[] = primeira.aInserir.map((t) => ({
+      cliente_id: t.cliente_id,
+      valor: t.valor,
+      data_vencimento: t.data_vencimento,
+    }));
+    const segunda = planejarImportacao(arquivo, mapa, agoraNoBanco);
+    expect(segunda.aInserir).toHaveLength(0);
+    expect(segunda.duplicatas).toBe(3);
+  });
+
+  it('numeric do Postgres (2850) e valor do CSV (2850.00) são o MESMO título', () => {
+    // O Postgres devolve `numeric` como número JSON: 2850.00 chega como 2850.
+    // Sem normalizar os dois lados, a chave divergiria e o título entraria duas vezes.
+    const existentes: TituloExistente[] = [
+      { cliente_id: 'cli-1', valor: 2850, data_vencimento: '2026-03-10' },
+    ];
+    const plano = planejarImportacao([linha(2, '5511900000001', 2850.0)], mapa, existentes);
+    expect(plano.duplicatas).toBe(1);
+    expect(plano.aInserir).toHaveLength(0);
+  });
+
+  it('mesmo cliente com valores diferentes gera dois títulos', () => {
+    const plano = planejarImportacao(
+      [linha(2, '5511900000001', 100), linha(3, '5511900000001', 200)],
+      mapa,
+      [],
+    );
+    expect(plano.aInserir).toHaveLength(2);
+    expect(plano.duplicatas).toBe(0);
+  });
+
+  it('mesmo valor em clientes diferentes não é duplicata', () => {
+    const plano = planejarImportacao(
+      [linha(2, '5511900000001', 100), linha(3, '5511900000002', 100)],
+      mapa,
+      [],
+    );
+    expect(plano.aInserir).toHaveLength(2);
+    expect(plano.duplicatas).toBe(0);
+  });
+
+  it('mesmo valor e cliente em vencimentos diferentes não é duplicata', () => {
+    const plano = planejarImportacao(
+      [linha(2, '5511900000001', 100, '2026-03-10'), linha(3, '5511900000001', 100, '2026-04-10')],
+      mapa,
+      [],
+    );
+    expect(plano.aInserir).toHaveLength(2);
+  });
+
+  it('título de OUTRO cliente não bloqueia a inserção', () => {
+    const existentes: TituloExistente[] = [
+      { cliente_id: 'cli-2', valor: 100, data_vencimento: '2026-03-10' },
+    ];
+    const plano = planejarImportacao([linha(2, '5511900000001', 100)], mapa, existentes);
+    expect(plano.aInserir).toHaveLength(1);
+    expect(plano.duplicatas).toBe(0);
+  });
+
+  it('linha sem cliente correspondente é reportada, nunca descartada em silêncio', () => {
+    const plano = planejarImportacao([linha(2, '5511999999999', 100)], mapa, []);
+    expect(plano.aInserir).toHaveLength(0);
+    expect(plano.duplicatas).toBe(0);
+    expect(plano.semCliente.map((l) => l.linha)).toEqual([2]);
+  });
+
+  it('preserva o número da linha de origem para relatar erro', () => {
+    const plano = planejarImportacao([linha(42, '5511900000001', 100)], mapa, []);
+    expect(plano.aInserir[0].linha).toBe(42);
+  });
+
+  it('nada a fazer com lista vazia', () => {
+    const plano = planejarImportacao([], mapa, []);
+    expect(plano).toEqual({ aInserir: [], duplicatas: 0, semCliente: [] });
+  });
+});
+
+describe('emLotes', () => {
+  it('divide em lotes do tamanho pedido e mantém a ordem', () => {
+    expect(emLotes([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it('lista menor que o lote vira um lote só', () => {
+    expect(emLotes([1, 2], 500)).toEqual([[1, 2]]);
+  });
+
+  it('lista vazia não gera lote nenhum', () => {
+    expect(emLotes([], 100)).toEqual([]);
   });
 });
