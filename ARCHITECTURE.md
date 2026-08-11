@@ -49,6 +49,7 @@ schema exige localizar todos os pontos de chamada manualmente (ver §7).
 | **Administração** | `src/app/dados/page.tsx`, `src/app/api/dados/route.ts` | Estatísticas agregadas + limpeza destrutiva de dados (protegida por frase de confirmação) |
 | **Acesso a dados** | `src/lib/supabase.ts` | Client Supabase único (service_role), lazy-init via Proxy |
 | **Política de I/O** | `src/lib/supabase-io.ts` | Prazo (8s leitura / 15s escrita), classificação infra × banco, paginação por cursor, e leitura que lança em vez de devolver vazio |
+| **Gravação da importação** | `src/lib/importacao.ts` | Máquina de estados que grava um lote convivendo com o índice único: conflito vira duplicata, e a conciliação final diz o que de fato ficou no banco. Recebe as operações de banco como parâmetro (`Portas`), então é testável com dublês |
 | **Layout / navegação** | `src/app/layout.tsx`, `src/components/Navbar.tsx`, `src/components/NavbarWrapper.tsx` | Casca visual, esconde navbar no login |
 
 Os módulos com limite de domínio bem definido e sem acesso direto ao banco são **priorização**
@@ -64,7 +65,7 @@ está fora", e paginação. Existe porque a alternativa (repetir `if (error)` em
 justamente o que falhou: `?? 0` espalhado por `/api/dados` transformava apagão em R$ 0,00.
 
 **Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`,
-`supabase-io.test.ts`. `lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
+`supabase-io.test.ts`, `importacao.test.ts`. `lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
 Server Action ou componente React tem cobertura — a verificação deles é manual (`npm run dev`) ou
 via E2E ad-hoc.
 
@@ -405,10 +406,12 @@ deles.
   Ainda sem cobertura: Server Actions (`actions/index.ts`), as rotas de API como integração
   (só testadas manualmente), e nenhum componente React. Mudar o corte de "7 dias" hoje quebraria
   um teste se divergisse entre os módulos que o usam — antes não haveria nenhum sinal.
-  **Lacuna conhecida e relevante**: concorrência e comportamento sob dependência fora não têm
-  teste automatizado — foram provados por reprodução manual contra o Supabase real. É o tipo de
-  propriedade que volta a quebrar sem ninguém notar; um teste de integração aqui vale mais que
-  mais dez casos unitários de domínio.
+  **Lacuna parcialmente fechada**: a decisão de o que fazer diante de um conflito de concorrência
+  saiu da rota para `lib/importacao.ts`, que recebe as operações de banco como parâmetro e por isso
+  é testável com dublês (`importacao.test.ts`). Foi feito porque a versão anterior, embutida na
+  rota, produziu dois defeitos que nenhum teste pegou — só a reprodução manual. **O que continua
+  sem cobertura**: o encadeamento HTTP das rotas, o comportamento sob dependência fora, e a
+  concorrência real contra o Postgres. Esses seguem provados apenas por reprodução manual.
 - **A confirmação da importação não é transacional.** O PostgREST não expõe transação entre
   requisições, então uma queda no meio deixa parte dos títulos gravados. Isso é tolerável só porque
   a reimportação é idempotente (garantida pelo índice único, não só pela checagem em memória) e a
