@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { lerPaginado, SupabaseIndisponivelError } from './supabase-io';
 
 // ---------------------------------------------------------------------------
 // Apuração de receita recuperada — a métrica que a tese do Atlas diz importar
@@ -61,30 +62,49 @@ export function somarRecuperado(
 /**
  * Quanto foi recuperado na janela. Usado pela home e por /api/dados.
  *
- * Devolve `null` — não `0` — quando a consulta falha (ex: a migration que cria
- * `resolvido_em` ainda não rodou). Zero é uma afirmação sobre dinheiro: dizer
- * "você não recuperou nada" quando na verdade a leitura quebrou é pior do que
- * admitir que o número não está disponível. Quem exibe decide como mostrar.
+ * Duas falhas diferentes, dois comportamentos diferentes — a distinção importa:
+ *
+ * - **O banco respondeu com erro** (tipicamente: a coluna `resolvido_em` não
+ *   existe porque a migration ainda não rodou). Devolve `null`, e quem exibe
+ *   mostra "—". Zero seria uma afirmação sobre dinheiro: dizer "você não
+ *   recuperou nada" quando a leitura quebrou é pior do que admitir que o número
+ *   não está disponível.
+ * - **Não conseguimos falar com o banco** (rede fora, timeout). Aí `null` seria
+ *   igualmente enganoso, porque não é uma limitação conhecida do schema — é
+ *   ausência de informação sobre TODO o resto também. Propaga a exceção para
+ *   que a rota inteira responda "indisponível" em vez de exibir uma tela cheia
+ *   de números que não conferem.
  */
 export async function totalRecuperado(
   dias: number = JANELA_RECUPERACAO_DIAS,
 ): Promise<number | null> {
-  const { data, error } = await supabase
-    .from('titulos')
-    .select('valor, resolvido_em')
-    .eq('status', 'pago')
-    .gte('resolvido_em', inicioJanelaRecuperacao(dias).toISOString());
+  const desde = inicioJanelaRecuperacao(dias).toISOString();
 
-  if (error) {
-    console.error(
-      '[recuperacao] falha ao apurar receita recuperada — a coluna resolvido_em existe? ' +
-      'Rode supabase/migration-01-ciclo-operacional.sql.',
-      error.message,
+  try {
+    const linhas = await lerPaginado<TituloRecuperavel>(
+      (sinal, de, ate) =>
+        supabase
+          .from('titulos')
+          .select('valor, resolvido_em')
+          .eq('status', 'pago')
+          .gte('resolvido_em', desde)
+          .range(de, ate)
+          .abortSignal(sinal),
+      'apuração de receita recuperada',
     );
-    return null;
-  }
 
-  // O filtro já veio do banco; somarRecuperado reaplica a janela porque é ele
-  // que os testes cobrem — a função continua correta mesmo com linhas a mais.
-  return somarRecuperado((data ?? []) as TituloRecuperavel[], dias);
+    // O filtro já veio do banco; somarRecuperado reaplica a janela porque é ele
+    // que os testes cobrem — a função continua correta mesmo com linhas a mais.
+    return somarRecuperado(linhas, dias);
+  } catch (e) {
+    if (e instanceof SupabaseIndisponivelError && !e.indisponivel) {
+      console.error(
+        '[recuperacao] falha ao apurar receita recuperada — a coluna resolvido_em existe? ' +
+        'Rode supabase/migration-01-ciclo-operacional.sql.',
+        e.detalhe,
+      );
+      return null;
+    }
+    throw e;
+  }
 }
