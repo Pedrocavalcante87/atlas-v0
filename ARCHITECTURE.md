@@ -162,8 +162,10 @@ Não passa por `lib/prioridade.ts`; a ordenação por urgência/status não exis
 
 ```
 dados/page.tsx (Client Component)
-   --fetch GET--> /api/dados        → agregações (count/sum) direto no Supabase
+   --fetch GET--> /api/dados        → agregações (count/sum) + lib/recuperacao.ts::totalRecuperado
    --fetch DELETE--> /api/dados?modo=tudo|concluidos → apaga linhas em cascata manual
+                     modo=concluidos apaga SOMENTE status='pago' (ver §5)
+                     modo=tudo exige a frase "EXCLUIR TUDO" no corpo (ver §9)
 ```
 Único fluxo do sistema em que a UI é Client Component chamando uma API Route via `fetch` em vez
 de Server Component + Server Action.
@@ -370,6 +372,15 @@ autenticação de senha única sem usuários individuais.
   de prévia. Continua assim — não é um problema, é intencional.
 - Não há forma de editar um cliente ou título já importado (nome/telefone errado) pela aplicação —
   a única saída é apagar tudo em `/dados` ou alterar direto no banco. Não endereçado nesta rodada.
+- **"Limpar títulos pagos" destrói o histórico da receita recuperada.** A ação apaga as linhas
+  pagas, e com elas o `resolvido_em` que sustenta a apuração dos últimos 30 dias — o valor
+  simplesmente sai do número. Não é bug (a ação é declaradamente irreversível e a UI avisa), mas
+  passou a ter um custo que antes não existia. Se a apuração virar algo que a empresa acompanha
+  ao longo do tempo, essa ação precisa ser repensada — decisão de produto, não tomada aqui.
+- **Os templates de mensagem não sabem que houve promessa quebrada.** Um título que reentra usa o
+  template da categoria de urgência dele. Para o caso comum (título vencido) o texto serve; para
+  uma promessa sobre título ainda a vencer, a mensagem fala de vencimento e ignora o combinado.
+  `motivoReentrada` existe no domínio e é exibido como badge, mas não influencia o texto gerado.
 
 ---
 
@@ -387,10 +398,14 @@ autenticação de senha única sem usuários individuais.
   de proporcionalidade pro estágio atual, não descuido — não introduza uma camada de repositório
   sem uma razão concreta (mais de uma implementação de storage, necessidade real de mock em teste
   de integração, etc.).
+- Se a mudança é sobre **quem aparece na lista do dia**, a regra é `lib/prioridade.ts::estaNaFilaHoje`
+  e o único estado terminal é `pago` (ver §5). Antes de escrever qualquer filtro por status,
+  pergunte se ele significa "ainda devido" (`!= 'pago'`) ou "encerrado" (`== 'pago'`) — usar
+  `'aberto'` como sinônimo de "ativo" já causou perda de dado neste projeto.
 - Se a mudança é sobre **exibir a lista do dia**, ela é composta por clientes (`ClienteCard`), não
   títulos soltos — um `TituloComPrioridade` sempre chega à tela dentro de um `ClienteAgrupado`.
-  `TituloCard` tem um modo `compact` (usado dentro de `ClienteCard`) que esconde o botão de
-  WhatsApp e a caixa de mensagem, porque o card do cliente já tem os dele, consolidados.
+  `TituloCard` é sempre renderizado dentro de `ClienteCard` e por isso não tem botão de WhatsApp
+  nem caixa de mensagem próprios: o card do cliente já tem os dele, consolidados.
 - Novas telas de leitura: o precedente majoritário é Server Component com query direta
   (`/dados` é a exceção histórica, não o padrão a seguir).
 - **Antes de assumir que algo documentado aqui está de fato acontecendo em produção, confira se o

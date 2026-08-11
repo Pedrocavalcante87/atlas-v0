@@ -258,6 +258,40 @@ real do projeto — seguir o mesmo padrão em código novo é consistente com o 
 
 ---
 
+## Decisões arquiteturais em vigor (não reabrir sem motivo novo)
+
+Decidido e implementado; mudar qualquer uma exige justificativa explícita, não preferência.
+
+- **Reentrada na fila é predicado de leitura, não job.** A home busca `.neq('status','pago')` e
+  `estaNaFilaHoje` decide quem aparece. Não introduza cron, worker, fila ou tabela de agendamento
+  para isso — a regra é uma função pura e testável, e o sistema não precisa de infraestrutura nova.
+- **`DIAS_SILENCIO_SEM_RESPOSTA` não é persistido.** É recalculado no momento da marcação, então
+  mudar a constante muda o comportamento sem migration.
+- **Datas de controle nulas contam como "já chegou"** — na dúvida o título volta para a fila.
+  Perder uma cobrança é pior do que mostrá-la cedo demais.
+- **Números de dinheiro nunca são inventados.** Quando a apuração de recuperado falha,
+  `totalRecuperado` devolve `null` e a UI mostra "—"; zero seria uma afirmação falsa. Mesma lógica
+  vale para qualquer métrica financeira nova.
+- **Uma validação de linha de CSV, chamada nas duas pontas** (prévia e confirmação). Paridade por
+  construção — não confie em manter duas listas de regras sincronizadas na mão.
+- **`lib/supabase.ts` é servidor-only e usa `service_role`.** Não criar política de RLS nem usar a
+  chave anônima no client — isso quebraria o modelo de segurança atual (ver §Banco de dados).
+
+## Fora de escopo por decisão (não implementar sem pedido explícito)
+
+Não são esquecimentos — foram avaliados e adiados por não serem o gargalo atual:
+
+- Multi-tenancy, contas de usuário individuais, isolamento por empresa. O Atlas é mono-empresa por
+  instância. Isso muda o modelo de segurança inteiro, não é ajuste incremental.
+- Envio automático de WhatsApp via API oficial. O `wa.me` manual resolve com fricção aceitável.
+- IA para priorização ou geração de mensagem. Não há volume de dado para aprender nada, e a
+  fórmula atual não foi provada insuficiente.
+- Notificações/lembretes agendados, exportação de relatórios, edição de cliente/título pela UI,
+  integrações com ERP, paginação da lista do dia.
+- Testes de componente React e E2E em CI.
+- Batching/transação na importação de CSV e limite explícito na query da home — conhecidos e
+  aceitos no volume atual (ver ARCHITECTURE.md §10).
+
 ## Banco de dados / Supabase
 
 - Ordem de execução obrigatória no SQL Editor do Supabase: `supabase/schema.sql` **depois**
