@@ -10,7 +10,14 @@ import {
   limparTelefone,
   dataEmFaixaRazoavel,
   validarLinhaRecebida,
+  planejarImportacao,
+  emLotes,
+  type TituloExistente,
 } from '@/lib/csv-import';
+import { lerPaginado, SupabaseIndisponivelError } from '@/lib/supabase-io';
+
+/** Valores num filtro `.in(...)` viajam na query string — lotes pequenos evitam URL longa demais. */
+const LOTE_IDS_EM_FILTRO = 100;
 
 // ---------------------------------------------------------------------------
 // Esta rota é SOMENTE PRÉVIA — faz o parsing, a validação e checa duplicatas
@@ -159,44 +166,77 @@ export async function POST(request: NextRequest) {
   }
 
   // ---- Passo 2: checar duplicatas contra o banco (somente leitura) ----
+  //
+  // As duas consultas abaixo eram feitas ignorando o `error` (só `{ data }` era
+  // desestruturado). Quando falhavam, `data` vinha null, nenhuma duplicata era
+  // detectada e a prévia prometia importar títulos que já existiam — a falha
+  // aparecia como "tudo certo". Agora qualquer falha interrompe a prévia com
+  // 503: melhor não prometer nada do que prometer errado.
+  //
+  // Os filtros `.in(...)` também são divididos em lotes: os valores viajam na
+  // query string e um arquivo grande (o teto é 20.000 linhas) montaria uma URL
+  // de centenas de KB, que o PostgREST rejeitaria.
   const telefonesUnicos = [...new Set(linhasValidas.map((l) => l.telefone))];
-  const { data: clientesExistentes } = telefonesUnicos.length
-    ? await supabase.from('clientes').select('id, telefone').in('telefone', telefonesUnicos)
-    : { data: [] as { id: string; telefone: string }[] };
+  const clienteIdPorTelefone = new Map<string, string>();
+  const titulosExistentes: TituloExistente[] = [];
 
-  const clienteIdPorTelefone = new Map(
-    (clientesExistentes ?? []).map((c) => [c.telefone, c.id]),
-  );
-  const clienteIds = [...clienteIdPorTelefone.values()];
-
-  const { data: titulosExistentes } = clienteIds.length
-    ? await supabase
-        .from('titulos')
-        .select('cliente_id, valor, data_vencimento')
-        .in('cliente_id', clienteIds)
-        .eq('status', 'aberto')
-    : { data: [] as { cliente_id: string; valor: number; data_vencimento: string }[] };
-
-  let duplicatas = 0;
-  const linhasParaImportar: typeof linhasValidas = [];
-
-  for (const linha of linhasValidas) {
-    const clienteId = clienteIdPorTelefone.get(linha.telefone);
-    const jaExiste = clienteId
-      ? (titulosExistentes ?? []).some(
-          (t) =>
-            t.cliente_id === clienteId &&
-            Number(t.valor) === linha.valor &&
-            t.data_vencimento === linha.dataVencimento,
-        )
-      : false;
-
-    if (jaExiste) {
-      duplicatas++;
-    } else {
-      linhasParaImportar.push(linha);
+  try {
+    for (const lote of emLotes(telefonesUnicos, LOTE_IDS_EM_FILTRO)) {
+      const encontrados = await lerPaginado<{ id: string; telefone: string }>(
+        (s, de, ate) =>
+          supabase.from('clientes').select('id, telefone').in('telefone', lote).range(de, ate).abortSignal(s),
+        'clientes já cadastrados',
+      );
+      for (const c of encontrados) clienteIdPorTelefone.set(c.telefone, c.id);
     }
+
+    for (const lote of emLotes([...clienteIdPorTelefone.values()], LOTE_IDS_EM_FILTRO)) {
+      const encontrados = await lerPaginado<TituloExistente>(
+        (s, de, ate) =>
+          supabase
+            .from('titulos')
+            .select('cliente_id, valor, data_vencimento')
+            .in('cliente_id', lote)
+            .eq('status', 'aberto')
+            .range(de, ate)
+            .abortSignal(s),
+        'títulos já existentes',
+      );
+      titulosExistentes.push(...encontrados);
+    }
+  } catch (e) {
+    if (e instanceof SupabaseIndisponivelError) {
+      return NextResponse.json(
+        {
+          error:
+            `Não foi possível verificar quais títulos já existem — ${e.message} ` +
+            `Nada foi lido nem gravado; tente de novo em instantes.`,
+        },
+        { status: 503 },
+      );
+    }
+    throw e;
   }
+
+  // A MESMA função que a confirmação usa para decidir o que gravar
+  // (lib/csv-import.ts::planejarImportacao) — paridade por construção, do mesmo
+  // jeito que `validarLinhaRecebida` já garantia para a validação de linha.
+  // Antes a prévia tinha a sua própria varredura, que não enxergava duplicata
+  // DENTRO do arquivo: um CSV com a mesma linha duas vezes anunciava "2 títulos
+  // prontos" e a gravação importava 1. Agora os dois lados contam igual.
+  //
+  // Cliente que ainda não existe recebe uma chave sintética: ele não tem título
+  // nenhum no banco, então só pode colidir com outra linha do próprio arquivo —
+  // que é exatamente a duplicata interna que queremos detectar.
+  const chavesParaPlano = new Map(clienteIdPorTelefone);
+  for (const t of telefonesUnicos) {
+    if (!chavesParaPlano.has(t)) chavesParaPlano.set(t, `novo:${t}`);
+  }
+
+  const plano = planejarImportacao(linhasValidas, chavesParaPlano, titulosExistentes);
+  const duplicatas = plano.duplicatas;
+  const linhasDoPlano = new Set(plano.aInserir.map((t) => t.linha));
+  const linhasParaImportar = linhasValidas.filter((l) => linhasDoPlano.has(l.linha));
 
   // ---- Breakdown financeiro pra exibir na prévia ----
   // Mesmo corte de urgência usado na lista do dia (lib/prioridade.ts) — antes
