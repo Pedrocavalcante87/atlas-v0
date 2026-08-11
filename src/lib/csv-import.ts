@@ -273,6 +273,30 @@ function chaveDoTitulo(clienteId: string, valor: number, dataVencimento: string)
 }
 
 /**
+ * Dos títulos que iam ser inseridos, quais ainda não existem no banco.
+ *
+ * Usada quando o índice único (`supabase/migration-02`) recusa um lote porque
+ * outra importação gravou parte dele no meio do caminho: reconsultamos o que
+ * existe agora e reenviamos só o que falta.
+ *
+ * Vive aqui, junto de `planejarImportacao`, porque as duas precisam concordar
+ * sobre o que é "o mesmo título" — se a chave divergir entre a decisão inicial
+ * e a reconciliação pós-conflito, o retry reenvia algo que já existe e a
+ * importação entra em laço ou reporta número errado.
+ */
+export function removerJaExistentes<T extends { cliente_id: string; valor: number; data_vencimento: string }>(
+  pendentes: T[],
+  existentes: TituloExistente[],
+): T[] {
+  const jaExiste = new Set(
+    existentes.map((t) => chaveDoTitulo(t.cliente_id, t.valor, t.data_vencimento)),
+  );
+  return pendentes.filter(
+    (t) => !jaExiste.has(chaveDoTitulo(t.cliente_id, t.valor, t.data_vencimento)),
+  );
+}
+
+/**
  * Clientes únicos por telefone, prontos para um único upsert em lote.
  *
  * Deduplicar é OBRIGATÓRIO, não uma otimização: mandar o mesmo telefone duas

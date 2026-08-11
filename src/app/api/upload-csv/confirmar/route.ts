@@ -5,6 +5,7 @@ import {
   validarLinhaRecebida,
   clientesParaUpsert,
   planejarImportacao,
+  removerJaExistentes,
   emLotes,
   type LinhaImportacao,
   type TituloExistente,
@@ -21,8 +22,16 @@ const LOTE_UPSERT_CLIENTES = 500;
 const LOTE_IDS_EM_FILTRO = 100;
 const LOTE_INSERT_TITULOS = 500;
 
-/** Teto de reinserções individuais seguidas antes de desistir de isolar a linha ruim. */
-const MAX_FALHAS_ISOLADAS = 10;
+/** SQLSTATE de violação de unicidade — aqui significa "outra importação chegou primeiro". */
+const CONFLITO_UNICIDADE = '23505';
+
+/**
+ * Quantas vezes reconsultar o banco e reenviar o que sobrou quando um lote bate
+ * no índice único. Converge sozinho: cada rodada só reenvia o que ainda não
+ * existe, e o competidor já gravou o resto. 3 é folga larga para o cenário real
+ * (duas abas do mesmo usuário).
+ */
+const MAX_TENTATIVAS_CONFLITO = 3;
 
 // ---------------------------------------------------------------------------
 // Confirma uma importação já revisada em /api/upload-csv (prévia). Recebe as
@@ -89,9 +98,19 @@ function responder(parcial: Omit<Relatorio, 'message'>): NextResponse {
   );
 }
 
-/** Grava um lote de títulos. O `insert` do Postgres é atômico: ou entra tudo, ou nada. */
-function inserirTitulos(lote: TituloParaInserir[]) {
-  return gravar<null>(
+/**
+ * Grava um lote de títulos e devolve QUANTOS entraram de fato.
+ *
+ * `.select('id')` não é enfeite: é a diferença entre contar o que se pediu e
+ * contar o que o banco aceitou. Antes esta função presumia `lote.length`, o que
+ * já era frágil e passaria a mentir agora que o banco pode recusar linhas por
+ * conflito.
+ *
+ * O `insert` é atômico: ou entra o lote inteiro, ou nenhum — inclusive quando
+ * uma única linha bate no índice único. Quem trata isso é `inserirComRetentativa`.
+ */
+async function inserirLote(lote: TituloParaInserir[]) {
+  return gravar<{ id: string }[]>(
     (sinal) =>
       supabase
         .from('titulos')
@@ -103,9 +122,108 @@ function inserirTitulos(lote: TituloParaInserir[]) {
             status: 'aberto',
           })),
         )
+        .select('id')
         .abortSignal(sinal),
     `insert de ${lote.length} título(s)`,
   );
+}
+
+/** Títulos em aberto que já existem para estes clientes, lidos agora. */
+async function titulosAbertosDe(clienteIds: string[]): Promise<TituloExistente[]> {
+  const achados: TituloExistente[] = [];
+  for (const lote of emLotes(clienteIds, LOTE_IDS_EM_FILTRO)) {
+    const pagina = await lerPaginado<TituloExistente & { id: string }>((sinal, apos, limite) => {
+      const base = supabase
+        .from('titulos')
+        .select('id, cliente_id, valor, data_vencimento', { count: 'exact' })
+        .in('cliente_id', lote)
+        .eq('status', 'aberto');
+      return (apos ? base.gt('id', apos) : base).order('id').limit(limite).abortSignal(sinal);
+    }, 'consulta de títulos já existentes');
+    achados.push(...pagina);
+  }
+  return achados;
+}
+
+interface ResultadoLote {
+  gravados: number;
+  /** Recusados pelo banco por já existirem — são duplicatas, não erros. */
+  duplicatasDeCorrida: number;
+  falha?: { indisponivel: boolean; mensagem: string };
+}
+
+/**
+ * Insere um lote convivendo com o índice único `idx_titulos_aberto_unico`
+ * (supabase/migration-02).
+ *
+ * Por que existe: a checagem de duplicata em memória olha o banco num instante
+ * e grava no instante seguinte. Entre os dois, outra importação pode gravar a
+ * mesma cobrança. Medido antes do índice: duas confirmações simultâneas do
+ * mesmo arquivo de 40 linhas gravaram 80 títulos, ambas relatando "0
+ * duplicatas". Verificar-antes-de-escrever não é atômico fora do banco.
+ *
+ * Com o índice, a segunda gravação passa a falhar com 23505 em vez de duplicar.
+ * Aqui esse erro é traduzido para o que ele significa no domínio — "alguém já
+ * gravou isto" — e não para uma falha: reconsultamos o que existe agora,
+ * reenviamos só o que continua faltando, e contamos o resto como duplicata.
+ *
+ * Sem a migration aplicada, o 23505 nunca acontece e este caminho não roda: o
+ * comportamento continua exatamente o de antes.
+ */
+async function inserirComRetentativa(lote: TituloParaInserir[]): Promise<ResultadoLote> {
+  let pendentes = lote;
+  let gravados = 0;
+
+  for (let tentativa = 1; ; tentativa++) {
+    const r = await inserirLote(pendentes);
+
+    if (r.ok) {
+      gravados += r.data?.length ?? 0;
+      return { gravados, duplicatasDeCorrida: lote.length - gravados };
+    }
+
+    const conflito = !r.indisponivel && r.detalhe.includes(CONFLITO_UNICIDADE);
+    if (!conflito || tentativa >= MAX_TENTATIVAS_CONFLITO) {
+      return {
+        gravados,
+        duplicatasDeCorrida: 0,
+        falha: { indisponivel: r.indisponivel, mensagem: r.mensagem },
+      };
+    }
+
+    // Alguém gravou parte disto entre a nossa checagem e agora. Reconsulta e
+    // reenvia só o que ainda falta — o lote encolhe a cada rodada, então o
+    // laço termina.
+    let existentes: TituloExistente[];
+    try {
+      existentes = await titulosAbertosDe([...new Set(pendentes.map((t) => t.cliente_id))]);
+    } catch {
+      return {
+        gravados,
+        duplicatasDeCorrida: 0,
+        falha: {
+          indisponivel: true,
+          mensagem: 'Não foi possível reverificar os títulos após um conflito de gravação.',
+        },
+      };
+    }
+
+    const restantes = removerJaExistentes(pendentes, existentes);
+
+    if (restantes.length === 0) {
+      return { gravados, duplicatasDeCorrida: lote.length - gravados };
+    }
+    if (restantes.length === pendentes.length) {
+      // Conflitou mas nada apareceu como existente: não é a corrida que
+      // imaginamos. Parar em vez de repetir a mesma requisição para sempre.
+      return {
+        gravados,
+        duplicatasDeCorrida: 0,
+        falha: { indisponivel: false, mensagem: r.mensagem },
+      };
+    }
+    pendentes = restantes;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -188,23 +306,10 @@ export async function POST(request: NextRequest) {
   // decidir duplicata com segurança, e inserir "no escuro" criaria títulos
   // repetidos — dado financeiro duplicado. Por isso ela aborta a importação.
   const ids = [...clienteIdPorTelefone.values()];
-  const titulosExistentes: TituloExistente[] = [];
+  let titulosExistentes: TituloExistente[];
 
   try {
-    for (const loteIds of emLotes(ids, LOTE_IDS_EM_FILTRO)) {
-      const pagina = await lerPaginado<TituloExistente>(
-        (sinal, de, ate) =>
-          supabase
-            .from('titulos')
-            .select('cliente_id, valor, data_vencimento')
-            .in('cliente_id', loteIds)
-            .eq('status', 'aberto')
-            .range(de, ate)
-            .abortSignal(sinal),
-        'consulta de títulos já existentes',
-      );
-      titulosExistentes.push(...pagina);
-    }
+    titulosExistentes = await titulosAbertosDe(ids);
   } catch {
     errors.push(
       'Não foi possível verificar quais títulos já existem. A importação foi interrompida ' +
@@ -228,78 +333,42 @@ export async function POST(request: NextRequest) {
 
   // ---- Passo 4: inserir os títulos em lote ----
   let count = 0;
+  let duplicatasDeCorrida = 0;
   let indisponivel = false;
 
   for (const lote of emLotes(plano.aInserir, LOTE_INSERT_TITULOS)) {
-    const r = await inserirTitulos(lote);
+    const r = await inserirComRetentativa(lote);
+    count += r.gravados;
+    duplicatasDeCorrida += r.duplicatasDeCorrida;
 
-    if (r.ok) {
-      count += lote.length;
-      continue;
-    }
-
-    if (r.indisponivel) {
-      // Dependência fora: os próximos lotes falhariam igual, só que mais
-      // devagar. Era exatamente isso que fazia a importação levar 78s e
-      // devolver um erro por linha, como se o CSV estivesse errado.
+    if (r.falha) {
       errors.push(
         `Linhas ${lote[0].linha}–${lote[lote.length - 1].linha}: ` +
-        `${lote.length} título(s) não gravados — ${r.mensagem}`,
+        `${lote.length - r.gravados} título(s) não gravados — ${r.falha.mensagem}`,
       );
-      indisponivel = true;
+      if (r.falha.indisponivel) {
+        // Dependência fora: os próximos lotes falhariam igual, só que mais
+        // devagar. Era exatamente isso que fazia a importação levar 78s e
+        // devolver um erro por linha, como se o CSV estivesse errado.
+        indisponivel = true;
+      }
       break;
     }
-
-    // Erro do BANCO (não da rede): o `insert` é atômico por lote, então uma
-    // única linha problemática derruba as outras 499 junto. Reinserir o lote
-    // linha a linha custa caro, mas só acontece nesse caminho raro — e evita
-    // que um dado ruim leve consigo um monte de dado bom, que era o
-    // comportamento do loop original.
-    //
-    // Com orçamento, porém: se o lote inteiro estiver falhando (ex.: os
-    // clientes foram apagados por outra aba entre o upsert e o insert, e todo
-    // FK quebrou), isolar linha a linha seria reintroduzir exatamente o N+1
-    // que este ciclo eliminou. Depois de MAX_FALHAS_ISOLADAS recusas seguidas
-    // desistimos e reportamos o resto como faixa.
-    let falhasSeguidas = 0;
-    let isoladas = 0;
-
-    for (const t of lote) {
-      if (falhasSeguidas >= MAX_FALHAS_ISOLADAS) {
-        const restantes = lote.slice(isoladas);
-        errors.push(
-          `Linhas ${restantes[0].linha}–${restantes[restantes.length - 1].linha}: ` +
-          `${restantes.length} título(s) não gravados — o banco recusou o lote inteiro.`,
-        );
-        break;
-      }
-      isoladas++;
-
-      const individual = await inserirTitulos([t]);
-      if (individual.ok) {
-        count++;
-        falhasSeguidas = 0;
-        continue;
-      }
-
-      errors.push(`Linha ${t.linha}: não gravada — ${individual.mensagem}`);
-      if (individual.indisponivel) {
-        indisponivel = true;
-        break;
-      }
-      falhasSeguidas++;
-    }
-    if (indisponivel) break;
   }
+
+  // Duplicata detectada na leitura + duplicata que só apareceu na gravação
+  // (outra importação chegou primeiro). As duas são a mesma coisa para quem
+  // olha o relatório: uma cobrança que já existia e não foi criada de novo.
+  const duplicatas = plano.duplicatas + duplicatasDeCorrida;
 
   // Linhas sem cliente também não foram gravadas — contá-las aqui evita que o
   // relatório feche uma conta que não fecha na realidade.
-  const naoGravadas = plano.aInserir.length - count + plano.semCliente.length;
+  const naoGravadas = plano.aInserir.length - count - duplicatasDeCorrida + plano.semCliente.length;
 
   return responder({
     resultado: indisponivel ? 'indisponivel' : errors.length > 0 ? 'parcial' : 'completo',
     count,
-    duplicatas: plano.duplicatas,
+    duplicatas,
     naoGravadas,
     errors,
   });

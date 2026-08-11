@@ -8,6 +8,7 @@ import {
   validarLinhaRecebida,
   clientesParaUpsert,
   planejarImportacao,
+  removerJaExistentes,
   emLotes,
   type LinhaImportacao,
   type TituloExistente,
@@ -428,5 +429,65 @@ describe('emLotes', () => {
 
   it('lista vazia não gera lote nenhum', () => {
     expect(emLotes([], 100)).toEqual([]);
+  });
+});
+
+describe('removerJaExistentes', () => {
+  // Usada na reconciliação depois que o índice único recusa um lote porque
+  // outra importação gravou parte dele. Precisa concordar com
+  // planejarImportacao sobre o que é "o mesmo título" — se divergir, o retry
+  // reenvia o que já existe e a importação não converge.
+  const pendente = (cliente_id: string, valor: number, data_vencimento = '2026-03-10') => ({
+    linha: 2,
+    cliente_id,
+    valor,
+    data_vencimento,
+  });
+
+  it('remove os que já existem e mantém os que faltam', () => {
+    const restantes = removerJaExistentes(
+      [pendente('cli-1', 100), pendente('cli-2', 200)],
+      [{ cliente_id: 'cli-1', valor: 100, data_vencimento: '2026-03-10' }],
+    );
+    expect(restantes).toHaveLength(1);
+    expect(restantes[0].cliente_id).toBe('cli-2');
+  });
+
+  it('usa a MESMA normalização de valor que planejarImportacao', () => {
+    // O Postgres devolve numeric 2850.00 como 2850; sem normalizar, o retry
+    // reenviaria um título que o banco acabou de recusar — laço infinito.
+    const restantes = removerJaExistentes(
+      [pendente('cli-1', 2850.0)],
+      [{ cliente_id: 'cli-1', valor: 2850, data_vencimento: '2026-03-10' }],
+    );
+    expect(restantes).toHaveLength(0);
+  });
+
+  it('concorda com planejarImportacao sobre o que é duplicata', () => {
+    const existentes = [{ cliente_id: 'cli-1', valor: 100, data_vencimento: '2026-03-10' }];
+    const mapa = new Map([['5511900000001', 'cli-1']]);
+
+    const plano = planejarImportacao(
+      [{ linha: 2, nome: 'X', telefone: '5511900000001', valor: 100, dataVencimento: '2026-03-10' }],
+      mapa,
+      existentes,
+    );
+    const restantes = removerJaExistentes([pendente('cli-1', 100)], existentes);
+
+    expect(plano.aInserir).toHaveLength(0);
+    expect(restantes).toHaveLength(0);
+  });
+
+  it('sem nada existente, devolve a lista inteira', () => {
+    const pendentes = [pendente('cli-1', 100), pendente('cli-2', 200)];
+    expect(removerJaExistentes(pendentes, [])).toHaveLength(2);
+  });
+
+  it('vencimento diferente não é o mesmo título', () => {
+    const restantes = removerJaExistentes(
+      [pendente('cli-1', 100, '2026-04-10')],
+      [{ cliente_id: 'cli-1', valor: 100, data_vencimento: '2026-03-10' }],
+    );
+    expect(restantes).toHaveLength(1);
   });
 });
