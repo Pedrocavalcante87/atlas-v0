@@ -21,6 +21,9 @@ const LOTE_UPSERT_CLIENTES = 500;
 const LOTE_IDS_EM_FILTRO = 100;
 const LOTE_INSERT_TITULOS = 500;
 
+/** Teto de reinserções individuais seguidas antes de desistir de isolar a linha ruim. */
+const MAX_FALHAS_ISOLADAS = 10;
+
 // ---------------------------------------------------------------------------
 // Confirma uma importação já revisada em /api/upload-csv (prévia). Recebe as
 // linhas que o BROWSER devolveu da prévia — ou seja, dado que não é confiável
@@ -252,22 +255,46 @@ export async function POST(request: NextRequest) {
     // linha a linha custa caro, mas só acontece nesse caminho raro — e evita
     // que um dado ruim leve consigo um monte de dado bom, que era o
     // comportamento do loop original.
+    //
+    // Com orçamento, porém: se o lote inteiro estiver falhando (ex.: os
+    // clientes foram apagados por outra aba entre o upsert e o insert, e todo
+    // FK quebrou), isolar linha a linha seria reintroduzir exatamente o N+1
+    // que este ciclo eliminou. Depois de MAX_FALHAS_ISOLADAS recusas seguidas
+    // desistimos e reportamos o resto como faixa.
+    let falhasSeguidas = 0;
+    let isoladas = 0;
+
     for (const t of lote) {
+      if (falhasSeguidas >= MAX_FALHAS_ISOLADAS) {
+        const restantes = lote.slice(isoladas);
+        errors.push(
+          `Linhas ${restantes[0].linha}–${restantes[restantes.length - 1].linha}: ` +
+          `${restantes.length} título(s) não gravados — o banco recusou o lote inteiro.`,
+        );
+        break;
+      }
+      isoladas++;
+
       const individual = await inserirTitulos([t]);
       if (individual.ok) {
         count++;
-      } else if (individual.indisponivel) {
-        errors.push(`Linha ${t.linha}: não gravada — ${individual.mensagem}`);
+        falhasSeguidas = 0;
+        continue;
+      }
+
+      errors.push(`Linha ${t.linha}: não gravada — ${individual.mensagem}`);
+      if (individual.indisponivel) {
         indisponivel = true;
         break;
-      } else {
-        errors.push(`Linha ${t.linha}: não gravada — ${individual.mensagem}`);
       }
+      falhasSeguidas++;
     }
     if (indisponivel) break;
   }
 
-  const naoGravadas = plano.aInserir.length - count;
+  // Linhas sem cliente também não foram gravadas — contá-las aqui evita que o
+  // relatório feche uma conta que não fecha na realidade.
+  const naoGravadas = plano.aInserir.length - count + plano.semCliente.length;
 
   return responder({
     resultado: indisponivel ? 'indisponivel' : errors.length > 0 ? 'parcial' : 'completo',
