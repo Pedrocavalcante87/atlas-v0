@@ -24,6 +24,7 @@ export default function DadosPage() {
   const [confirmacao, setConfirmacao] = useState<'tudo' | 'concluidos' | null>(null);
   const [deletando, setDeletando] = useState(false);
   const [mensagem, setMensagem] = useState('');
+  const [erroExclusao, setErroExclusao] = useState('');
 
   // Não seta loadingStats(true) aqui — o estado inicial já é `true` (skeleton
   // aparece no primeiro render) e chamar setState de forma síncrona dentro do
@@ -66,20 +67,36 @@ export default function DadosPage() {
   async function limpar(modo: 'tudo' | 'concluidos') {
     setDeletando(true);
     setMensagem('');
-    const res = await fetch(`/api/dados?modo=${modo}`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      // "tudo" exige a frase exata que o servidor valida — ver api/dados/route.ts.
-      body: JSON.stringify(modo === 'tudo' ? { confirmacao: 'EXCLUIR TUDO' } : {}),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      setMensagem(data?.error ?? 'Erro ao remover dados.');
-    } else {
-      setMensagem(data.mensagem ?? 'Dados removidos.');
-      setLoadingStats(true);
-      await carregarStats();
+    setErroExclusao('');
+
+    try {
+      const res = await fetch(`/api/dados?modo=${modo}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        // "tudo" exige a frase exata que o servidor valida — ver api/dados/route.ts.
+        body: JSON.stringify(modo === 'tudo' ? { confirmacao: 'EXCLUIR TUDO' } : {}),
+      });
+      const data = await res.json().catch(() => null);
+
+      // Falha de exclusão NÃO pode entrar em `mensagem`: aquilo é renderizado
+      // numa caixa verde com um ✅. Uma auditoria pegou "A exclusão foi
+      // interrompida — parte dos dados pode ter sido removida" aparecendo como
+      // sucesso. É o mesmo tipo de mentira que este ciclo veio eliminar, só que
+      // sobre uma operação irreversível.
+      if (!res.ok) {
+        setErroExclusao(data?.error ?? 'Não foi possível remover os dados.');
+      } else {
+        setMensagem(data?.mensagem ?? 'Dados removidos.');
+      }
+    } catch {
+      setErroExclusao('Não foi possível falar com o servidor. Nada foi confirmado.');
     }
+
+    // Recarrega SEMPRE, inclusive depois de falhar: se a exclusão parou no meio,
+    // os números da tela viraram ficção e o usuário precisa ver o estado real.
+    setLoadingStats(true);
+    await carregarStats();
+
     setConfirmacao(null);
     setDeletando(false);
   }
@@ -168,11 +185,23 @@ export default function DadosPage() {
         )}
       </div>
 
-      {/* Mensagem de feedback */}
+      {/* Sucesso da exclusão */}
       {mensagem && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex gap-2.5 text-sm text-emerald-800 mb-6">
           <span>✅</span>
           <span>{mensagem}</span>
+        </div>
+      )}
+
+      {/* Falha da exclusão — vermelho, nunca verde. A exclusão pode ter parado
+          no meio, e o usuário precisa saber disso antes de tentar de novo. */}
+      {erroExclusao && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex gap-2.5 text-sm mb-6">
+          <span className="shrink-0">❌</span>
+          <div>
+            <p className="text-red-800 font-semibold">A exclusão não foi concluída</p>
+            <p className="text-red-700 text-xs mt-0.5 leading-relaxed">{erroExclusao}</p>
+          </div>
         </div>
       )}
 
