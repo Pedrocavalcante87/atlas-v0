@@ -48,7 +48,7 @@ schema exige localizar todos os pontos de chamada manualmente (ver §7).
 | **Mutação de estado** | `src/actions/index.ts` | Server Actions: registrar envio, atualizar status de título |
 | **Administração** | `src/app/dados/page.tsx`, `src/app/api/dados/route.ts` | Estatísticas agregadas + limpeza destrutiva de dados (protegida por frase de confirmação) |
 | **Acesso a dados** | `src/lib/supabase.ts` | Client Supabase único (service_role), lazy-init via Proxy |
-| **Política de I/O** | `src/lib/supabase-io.ts` | Prazo (8s leitura / 15s escrita), classificação infra × banco, paginação de listas, e leitura que lança em vez de devolver vazio |
+| **Política de I/O** | `src/lib/supabase-io.ts` | Prazo (8s leitura / 15s escrita), classificação infra × banco, paginação por cursor, e leitura que lança em vez de devolver vazio |
 | **Layout / navegação** | `src/app/layout.tsx`, `src/components/Navbar.tsx`, `src/components/NavbarWrapper.tsx` | Casca visual, esconde navbar no login |
 
 Os módulos com limite de domínio bem definido e sem acesso direto ao banco são **priorização**
@@ -168,6 +168,20 @@ por teste. Duas regras que a versão em lote precisa manter e que os testes prot
 2. **Telefone repetido no mesmo `upsert`** derruba o comando inteiro com SQLSTATE 21000
    ("ON CONFLICT DO UPDATE command cannot affect row a second time"). Deduplicar por telefone é
    obrigatório, não otimização.
+
+**A garantia de não-duplicidade é do banco.** `idx_titulos_aberto_unico`
+(`supabase/migration-02`) impede um segundo título `aberto` com o mesmo
+(cliente, valor, vencimento). `planejarImportacao` continua decidindo em memória, mas como
+otimização e para *relatar* duplicatas — não como garantia: entre a consulta e o insert existe uma
+janela, e ela foi explorada sem malícia nenhuma (duas abas). Medido antes do índice: duas
+confirmações simultâneas de 40 linhas gravaram 80 títulos, ambas relatando "0 duplicatas"; na
+versão linha a linha da `main`, 75.
+
+Com o índice, o insert conflitante falha com **23505**, e `inserirComRetentativa` traduz isso para
+o que significa no domínio — "alguém já gravou isto" — reconsultando o que existe e reenviando só
+o que falta. O campo `duplicatas` soma as duas origens (detectadas na leitura + detectadas na
+gravação). A contagem de gravados vem de `.select('id')` no insert, ou seja, do que o banco
+aceitou, não do que foi pedido.
 
 **Contrato de resposta** — `resultado` é `completo` | `parcial` | `indisponivel`. HTTP 200 para os
 dois primeiros (rejeição de linha por dado ruim é resposta legítima de import em lote); **503**
@@ -385,16 +399,25 @@ deles.
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
 - ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `lib/prioridade.ts` e
   `lib/csv-import.ts` (as duas áreas de maior risco financeiro/dado — score, categorização,
-  parsing de valor/data/telefone) agora têm suíte de testes (`vitest`, `npm run test`, 119 casos,
-  incluindo o planejamento da importação em lote e a classificação de falha de I/O).
+  parsing de valor/data/telefone) agora têm suíte de testes (`vitest`, `npm run test`, 127 casos,
+  incluindo o planejamento da importação em lote, a reconciliação pós-conflito, a paginação por
+  cursor e a classificação de falha de I/O).
   Ainda sem cobertura: Server Actions (`actions/index.ts`), as rotas de API como integração
   (só testadas manualmente), e nenhum componente React. Mudar o corte de "7 dias" hoje quebraria
   um teste se divergisse entre os módulos que o usam — antes não haveria nenhum sinal.
+  **Lacuna conhecida e relevante**: concorrência e comportamento sob dependência fora não têm
+  teste automatizado — foram provados por reprodução manual contra o Supabase real. É o tipo de
+  propriedade que volta a quebrar sem ninguém notar; um teste de integração aqui vale mais que
+  mais dez casos unitários de domínio.
 - **A confirmação da importação não é transacional.** O PostgREST não expõe transação entre
   requisições, então uma queda no meio deixa parte dos títulos gravados. Isso é tolerável só porque
-  a reimportação é idempotente (checagem de duplicata) e a resposta diz exatamente quantos entraram.
-  Se algum dia isso precisar de rollback de verdade, o caminho é uma função RPC no Postgres, que é
-  mudança de schema — não ajuste incremental.
+  a reimportação é idempotente (garantida pelo índice único, não só pela checagem em memória) e a
+  resposta diz exatamente quantos entraram. Se algum dia isso precisar de rollback de verdade, o
+  caminho é uma função RPC no Postgres, que é mudança de schema — não ajuste incremental.
+- **`ON CONFLICT` do PostgREST não alcança índice parcial.** Verificado: `ignoreDuplicates` sem
+  `onConflict` mira a PK e estoura 23505; e `onConflict` só aceita nomes de coluna, sem o predicado
+  que o Postgres exige para inferir um índice parcial. Por isso a aplicação trata o 23505 em vez de
+  pedir `DO NOTHING` — se um dia alguém quiser `DO NOTHING` de verdade aqui, o caminho é RPC.
 - **A lista do dia renderiza todos os clientes da fila de uma vez.** Com 1149 títulos em base de
   teste, a home levou ~3,8s para montar 734 cards — o custo agora é render, não banco. Paginação de
   UI continua fora de escopo, mas passa a ser o próximo gargalo real de percepção.

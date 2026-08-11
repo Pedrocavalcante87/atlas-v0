@@ -311,15 +311,21 @@ supabase/schema.sql
 supabase/rls.sql
 ```
 
-Se o banco **já existia** antes desta versão, rode também:
+Se o banco **já existia** antes desta versão, rode também, nesta ordem:
 
 ```
 supabase/migration-01-ciclo-operacional.sql
+supabase/migration-02-titulo-aberto-unico.sql
 ```
 
-Ele adiciona `silenciado_ate` e `resolvido_em` em `titulos` — colunas que o `schema.sql` não cria
-em bancos existentes (ele usa `create table if not exists`). Sem elas, o card "Recuperado" mostra
-"—" e registrar o resultado de um título falha com erro explícito.
+A **01** adiciona `silenciado_ate` e `resolvido_em` em `titulos` — colunas que o `schema.sql` não
+cria em bancos existentes (ele usa `create table if not exists`). Sem elas, o card "Recuperado"
+mostra "—" e registrar o resultado de um título falha com erro explícito.
+
+A **02** cria o índice que impede dois títulos em aberto idênticos para o mesmo cliente. Sem ele,
+duas importações simultâneas do mesmo arquivo (duas abas, por exemplo) gravam a mesma cobrança
+duas vezes sem avisar. **Ela apaga duplicatas que já existam** no banco, preservando o histórico
+de interações delas — leia o cabeçalho do arquivo antes de rodar.
 
 O `schema.sql` cria as três tabelas (`clientes`, `titulos`, `interacoes`) e os índices necessários. O `rls.sql` habilita Row Level Security nelas — **passo obrigatório**: sem ele, qualquer pessoa que obtenha a URL do projeto e a chave anônima do Supabase consegue ler e escrever nas tabelas. Com RLS habilitado e nenhuma política criada, esse acesso fica bloqueado e o app continua funcionando porque fala com o banco pelo servidor, usando a `service_role`.
 
@@ -412,7 +418,8 @@ src/
 supabase/
 ├── schema.sql                            # DDL — banco novo
 ├── rls.sql                               # Habilita RLS (rodar depois do schema)
-└── migration-01-ciclo-operacional.sql    # Colunas do ciclo — bancos já existentes
+├── migration-01-ciclo-operacional.sql    # Colunas do ciclo — bancos já existentes
+└── migration-02-titulo-aberto-unico.sql  # Índice único de título em aberto
 ```
 
 ---

@@ -42,4 +42,20 @@ create index if not exists idx_interacoes_titulo_id on interacoes(titulo_id);
 create index if not exists idx_titulos_resolvido_em on titulos(resolvido_em)
   where resolvido_em is not null;
 
+-- No máximo UM título em aberto por (cliente, valor, vencimento).
+--
+-- A importação de CSV sempre tratou essa tripla como identidade de um título em
+-- aberto, mas a regra vivia só na aplicação, entre uma consulta e um insert —
+-- e verificar-antes-de-escrever não é atômico fora do banco. Sem este índice,
+-- duas importações simultâneas do mesmo arquivo gravam a mesma cobrança duas
+-- vezes (medido: 40 linhas viraram 80 títulos, com as duas respostas dizendo
+-- "0 duplicatas").
+--
+-- O recorte `status = 'aberto'` é deliberado: um título PAGO com os mesmos
+-- valores não bloqueia uma cobrança nova. Ver supabase/migration-02 para o
+-- mesmo índice em bancos que já existem.
+create unique index if not exists idx_titulos_aberto_unico
+  on titulos (cliente_id, valor, data_vencimento)
+  where status = 'aberto';
+
 

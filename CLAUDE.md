@@ -292,6 +292,19 @@ nenhum aviso. Resposta truncada é indistinguível de resposta completa.
 título repetido conforme o negócio cresce. `ler` (sem paginar) só serve para `count`/`head` e para
 buscar UMA linha.
 
+`lerPaginado` pagina **por cursor**, não por offset — quem chama precisa selecionar `id`,
+ordenar por `id` e aplicar `.gt('id', apos)`; o tipo `T extends { id: string }` obriga. Duas
+razões, as duas com cicatriz:
+
+- **Nunca infira "acabou" do tamanho da página.** A versão anterior parava quando a página vinha
+  incompleta, o que só funcionava porque o tamanho da página era igual ao teto. Com página de
+  1500 contra teto de 1000, ela lia 1000 de 1269 linhas e subnotificava R$ 243 mil, calada.
+- **Offset sem ordenação não particiona.** Sem `order by`, duas requisições podem devolver as
+  linhas em ordens diferentes e uma linha some ou é contada duas vezes numa soma de dinheiro.
+
+Se precisar de outra ordem para EXIBIR, ordene em memória depois de ler tudo (é o que
+`clientes/[id]` faz) — a chave de paginação precisa ser única e estável, e `data_vencimento` não é.
+
 ## Falha de dependência — o que não pode acontecer
 
 Invariante do produto, não preferência de estilo:
@@ -310,6 +323,21 @@ vazio enquanto havia dados, e a importação culpava linhas do CSV por uma queda
 - **Escrita não tem retry, e isso é decisão.** O `postgrest-js` só repete GET/HEAD/OPTIONS;
   reenviar um `insert` cuja resposta se perdeu duplicaria um título. Não reintroduza retry de
   escrita. A recuperação é reimportar — a checagem de duplicata torna isso idempotente.
+  (Exceção controlada: `inserirComRetentativa` reenvia após um **conflito de unicidade**, que é
+  outra coisa — ali o banco já garantiu que nada foi gravado em duplicidade, e o reenvio leva só
+  o que ainda não existe.)
+
+## Duplicidade de título é garantida pelo BANCO, não pela aplicação
+
+`idx_titulos_aberto_unico` (migration 02) é a fonte de verdade: no máximo um título `aberto` por
+(cliente, valor, vencimento). A checagem em memória (`planejarImportacao`) continua existindo para
+**relatar** duplicatas e evitar ida desnecessária ao banco — mas ela não é garantia, porque
+verificar-e-depois-escrever não é atômico. Já foi: duas abas importando o mesmo arquivo geravam
+cobrança em duplicidade com as duas telas dizendo "0 duplicatas".
+
+Consequência prática para quem mexer aqui: **um `insert` em `titulos` pode falhar com 23505 e isso
+não é erro** — é "alguém já gravou". Trate como duplicata (ver `inserirComRetentativa`), nunca como
+falha para o usuário.
 - Prazos em `lib/supabase-io.ts`: 8s leitura, 15s escrita. Sem eles o padrão do undici é 300s.
 
 ## Fora de escopo por decisão (não implementar sem pedido explícito)
@@ -332,11 +360,16 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
 ## Banco de dados / Supabase
 
 - Ordem de execução obrigatória no SQL Editor do Supabase: `supabase/schema.sql` **depois**
-  `supabase/rls.sql`. Em banco que **já existe**, rodar também
-  `supabase/migration-01-ciclo-operacional.sql` (as colunas `silenciado_ate`/`resolvido_em` não
-  chegam por `schema.sql`, que usa `create table if not exists`). Sem essa migration a apuração
-  de recuperado devolve `null` (a UI mostra "—") e registrar resultado de título falha com erro
-  explícito — por design, nada de número falso.
+  `supabase/rls.sql`. Em banco que **já existe**, rodar também, nesta ordem:
+  1. `supabase/migration-01-ciclo-operacional.sql` — as colunas `silenciado_ate`/`resolvido_em`
+     não chegam por `schema.sql`, que usa `create table if not exists`. Sem ela a apuração de
+     recuperado devolve `null` (a UI mostra "—") e registrar resultado de título falha com erro
+     explícito — por design, nada de número falso.
+  2. `supabase/migration-02-titulo-aberto-unico.sql` — índice único de título em aberto. **Apaga
+     duplicatas pré-existentes** (preservando as interações delas); leia o cabeçalho antes de
+     rodar. Sem ela, duas importações simultâneas do mesmo arquivo gravam a mesma cobrança duas
+     vezes, sem aviso — reproduzido: 40 linhas viraram 80 títulos com as duas respostas dizendo
+     "0 duplicatas". A aplicação funciona sem o índice, só não tem a garantia.
 - RLS está habilitado nas 3 tabelas **sem nenhuma política** — isso bloqueia totalmente a chave
   anônima (exposta no browser por design do Supabase). Todo acesso do app passa pela
   `SUPABASE_SERVICE_ROLE_KEY`, usada só em `lib/supabase.ts`, só no servidor. **Não crie política
