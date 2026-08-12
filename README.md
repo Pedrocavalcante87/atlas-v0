@@ -108,6 +108,18 @@ Tela para subir um arquivo CSV com os títulos de cobrança.
 
 > Essa separação em duas etapas existe para evitar subir uma planilha errada (coluna mapeada errado, data trocada) direto pro banco sem chance de revisão.
 
+**O relatório final tem três desfechos, e a cor acompanha o que aconteceu:**
+
+| Desfecho | Cor | Significa |
+|---|---|---|
+| Importação concluída | verde | Tudo que devia entrar entrou |
+| Concluída em parte | âmbar | Alguma linha foi recusada — o motivo aparece na lista de erros |
+| Interrompida — banco indisponível | vermelho | Problema de conexão, **não** com a sua planilha |
+
+No caso vermelho a tela informa quantos títulos chegaram a ser gravados antes da queda e avisa que
+**reimportar o mesmo arquivo é seguro**: o que já entrou é reconhecido como duplicata e não entra
+duas vezes.
+
 **O sistema é inteligente no reconhecimento de colunas.** Ele aceita muitos nomes diferentes para cada campo — útil para planilhas exportadas de diferentes ERPs ou sistemas:
 
 | Campo esperado | Exemplos de nomes aceitos |
@@ -171,7 +183,6 @@ Painel administrativo com visão geral do banco de dados e opções de limpeza. 
 **Estatísticas exibidas:**
 
 - Total de clientes cadastrados
-- Total de clientes cadastrados
 - Títulos em aberto — tudo que ainda não foi pago, incluindo os que aguardam follow-up
 - Títulos pagos — o único estado que encerra um título
 - Total geral de títulos
@@ -190,6 +201,14 @@ Painel administrativo com visão geral do banco de dados e opções de limpeza. 
 > Atenção ao "Limpar títulos pagos": apagar um título pago também apaga o registro de que ele foi
 > recuperado, então o valor sai da apuração dos últimos 30 dias. Use com parcimônia se quiser
 > preservar o histórico da métrica.
+
+**Se o banco não responder, esta tela não mostra número nenhum.** Em vez de exibir zeros, aparece
+um aviso de dados indisponíveis com um botão para tentar de novo — e as ações de limpeza **somem**
+enquanto o estado real for desconhecido. É deliberado: já foi possível ver "0 títulos" por falha de
+leitura e clicar em "Limpar tudo" logo abaixo achando que não havia nada a perder.
+
+Se uma exclusão falhar no meio, a mensagem é vermelha e avisa que parte dos dados pode ter sido
+removida — nunca verde de sucesso.
 
 ---
 
@@ -265,20 +284,35 @@ clientes
 
 titulos
   id               UUID (PK)
-  cliente_id       UUID (FK → clientes)
+  cliente_id       UUID (FK → clientes, ON DELETE CASCADE)
   valor            NUMERIC
   data_vencimento  DATE
   status           TEXT  [aberto | pago | promessa | sem_resposta]
-  data_promessa    DATE (nullable)
+  data_promessa    DATE        (nullable — status 'promessa': volta à fila nessa data)
+  silenciado_ate   DATE        (nullable — status 'sem_resposta': fora da fila até aqui)
+  resolvido_em     TIMESTAMPTZ (nullable — preenchido só ao virar 'pago';
+                                é a fonte da métrica de receita recuperada)
   criado_em        TIMESTAMP
 
 interacoes
   id               UUID (PK)
-  titulo_id        UUID (FK → titulos)
+  titulo_id        UUID (FK → titulos, ON DELETE CASCADE)
   mensagem_enviada TEXT
   data_envio       TIMESTAMP
   resultado        TEXT
 ```
+
+**Índice que carrega uma regra de negócio:**
+
+```sql
+idx_titulos_aberto_unico
+  UNIQUE (cliente_id, valor, data_vencimento) WHERE status = 'aberto'
+```
+
+No máximo um título **em aberto** por cliente/valor/vencimento. É isso que impede que importar o
+mesmo arquivo em duas abas ao mesmo tempo gere cobrança em duplicidade. O recorte
+`WHERE status = 'aberto'` é intencional: um título já **pago** com os mesmos valores não bloqueia
+uma cobrança nova.
 
 ---
 
@@ -292,6 +326,7 @@ interacoes
 | Banco de dados | Supabase (PostgreSQL) |
 | Parse de CSV | PapaParse |
 | Autenticação | Cookie HTTP-only + middleware |
+| Testes | Vitest (143 casos, domínio e política de I/O) |
 
 ---
 
@@ -403,12 +438,14 @@ src/
 │   └── NavbarWrapper.tsx      # Oculta navbar na tela de login
 ├── lib/
 │   ├── supabase.ts            # Cliente do banco de dados (service_role, só no servidor)
+│   ├── supabase-io.ts         # Política de acesso: prazo, falha de dependência, paginação
 │   ├── prioridade.ts          # Priorização, agrupamento e ciclo de vida do título (estaNaFilaHoje)
 │   ├── recuperacao.ts         # Apuração da receita recuperada
-│   ├── csv-import.ts          # Aliases de coluna, normalização e validação do CSV
+│   ├── csv-import.ts          # Aliases de coluna, normalização, validação e plano de importação
+│   ├── importacao.ts          # Gravação do lote de títulos (trata conflito de duplicidade)
 │   ├── format.ts              # Formatação de moeda compartilhada
 │   ├── templates.ts           # Templates das mensagens de cobrança (individuais e consolidadas)
-│   └── *.test.ts              # Testes do domínio (prioridade, recuperacao, csv-import)
+│   └── *.test.ts              # Testes (prioridade, csv-import, recuperacao, supabase-io, importacao)
 ├── actions/
 │   └── index.ts               # Server actions para registrar envio e atualizar status
 ├── types/
@@ -448,7 +485,13 @@ Siga estes passos para validar o funcionamento completo do sistema:
 ### Cenário 3 — Deduplicação no CSV
 
 1. Suba o mesmo arquivo CSV duas vezes (analisando e confirmando a primeira).
-2. Na segunda vez, já na etapa de prévia (antes de confirmar), o sistema deve informar que X título(s) seriam ignorados por duplicação.
+2. Na segunda vez, já na etapa de prévia (antes de confirmar), o sistema deve informar que X
+   título(s) seriam ignorados por duplicação.
+3. Coloque a **mesma linha duas vezes dentro do mesmo arquivo**: a prévia deve contar uma como
+   duplicata, e a importação deve gravar apenas uma.
+4. Abra `/upload` em **duas abas**, analise o mesmo arquivo nas duas e confirme quase ao mesmo
+   tempo. As duas telas devem terminar sem erro, e o total de títulos no banco deve ser o do
+   arquivo — não o dobro. Uma das abas reporta os títulos como gravados e a outra como duplicatas.
 
 ### Cenário 4 — CSV com colunas diferentes
 
@@ -481,7 +524,13 @@ Siga estes passos para validar o funcionamento completo do sistema:
 - Não há notificações ou lembretes agendados: a reentrada de um título acontece quando você abre
   a lista do dia, não por aviso ativo.
 - A exportação de relatórios não está implementada.
-- Não há paginação na lista do dia (todos os títulos urgentes são exibidos de uma vez).
+- Não há paginação **de tela** na lista do dia: todos os clientes da fila são exibidos de uma vez.
+  Com muitos títulos a página fica lenta para montar — em base de teste, ~6,6s para 915 cards. O
+  custo é de renderização, não de banco (a leitura em si responde em menos de 1s no mesmo cenário).
+  A *leitura* é paginada internamente e sempre completa; o que não existe é limitar quantos cards
+  aparecem por vez.
+- Não é possível editar um cliente ou título já importado pela interface (nome ou telefone errado).
+  A saída é corrigir na origem e reimportar, ou alterar direto no banco.
 
 **Sobre a métrica de receita recuperada:**
 

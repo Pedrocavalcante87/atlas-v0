@@ -28,10 +28,14 @@ Browser ──▶ Next.js (App Router)
               └─ Middleware (proxy.ts) — gate de autenticação por senha
 ```
 
-Não existe camada de repositório/DAO. Toda leitura e escrita ao banco é feita chamando o client
-Supabase diretamente do lugar que precisa do dado — Server Component, Server Action ou API Route.
-Isso é uma escolha real do projeto, não um detalhe de implementação escondido: qualquer mudança de
-schema exige localizar todos os pontos de chamada manualmente (ver §7).
+Não existe camada de repositório/DAO. A query é montada com o client Supabase direto do lugar que
+precisa do dado — Server Component, Server Action ou API Route. Isso é uma escolha real do projeto,
+não um detalhe escondido: qualquer mudança de schema exige localizar todos os pontos de chamada
+manualmente (ver §7).
+
+O que existe é uma camada fina de **política**, `lib/supabase-io.ts`, que toda chamada atravessa —
+prazo, classificação de falha e paginação. Ela não conhece tabela nem coluna, então não substitui
+um repositório; ela impede que cada ponto de chamada invente o próprio tratamento de erro (ver §2).
 
 ---
 
@@ -52,9 +56,13 @@ schema exige localizar todos os pontos de chamada manualmente (ver §7).
 | **Gravação da importação** | `src/lib/importacao.ts` | Máquina de estados que grava um lote convivendo com o índice único: conflito vira duplicata, e a conciliação final diz o que de fato ficou no banco. Recebe as operações de banco como parâmetro (`Portas`), então é testável com dublês |
 | **Layout / navegação** | `src/app/layout.tsx`, `src/components/Navbar.tsx`, `src/components/NavbarWrapper.tsx` | Casca visual, esconde navbar no login |
 
-Os módulos com limite de domínio bem definido e sem acesso direto ao banco são **priorização**
-(`lib/prioridade.ts` + `lib/templates.ts`), **ingestão de CSV** (`lib/csv-import.ts`) e
-**formatação** (`lib/format.ts`): recebem dados já carregados e devolvem dados derivados, sem I/O.
+Os módulos sem acesso direto ao banco são **priorização** (`lib/prioridade.ts` +
+`lib/templates.ts`), **ingestão de CSV** (`lib/csv-import.ts`), **formatação** (`lib/format.ts`) e
+**gravação da importação** (`lib/importacao.ts`). Os três primeiros são puros: recebem dados
+carregados e devolvem dados derivados. `lib/importacao.ts` é diferente — ele orquestra I/O, mas
+**recebe as operações como parâmetro** em vez de importar `lib/supabase.ts`, o que o torna
+exercitável com dublês sem subir servidor.
+
 `lib/recuperacao.ts` é misto de propósito — a apuração (`somarRecuperado`,
 `inicioJanelaRecuperacao`) é pura e testada; só `totalRecuperado` toca o banco, e é fino.
 
@@ -78,26 +86,36 @@ app/page.tsx ──▶ lib/prioridade.ts ──▶ lib/templates.ts ──▶ ty
      │                │                                          ▲
      │                └──▶ ClienteCard.tsx ──▶ actions/index.ts ──┘
      │                          └──▶ TituloCard.tsx ──▶ actions/index.ts
-     └──▶ lib/supabase.ts
+     └──▶ lib/supabase-io.ts ──▶ lib/supabase.ts
 
-upload/page.tsx ──▶ api/upload-csv (fetch) ──▶ lib/csv-import.ts + lib/prioridade.ts ──▶ lib/supabase.ts
-                 └─▶ api/upload-csv/confirmar (fetch) ──▶ lib/csv-import.ts ──▶ lib/supabase.ts
-                       (agora compartilham lib/csv-import.ts — confirmar revalida
-                       estruturalmente cada linha antes de gravar, não confia no payload)
+upload/page.tsx ──▶ api/upload-csv (fetch) ──▶ lib/csv-import.ts + lib/prioridade.ts
+                 │                          └─▶ lib/supabase-io.ts ──▶ lib/supabase.ts
+                 └─▶ api/upload-csv/confirmar (fetch) ──▶ lib/csv-import.ts
+                                                       ├─▶ lib/importacao.ts  (I/O injetado)
+                                                       └─▶ lib/supabase-io.ts ──▶ lib/supabase.ts
+                       (as duas rotas compartilham validarLinhaRecebida E planejarImportacao —
+                        paridade de validação e de contagem de duplicata por construção)
 
-dados/page.tsx ──▶ api/dados (fetch) ──▶ lib/prioridade.ts (calcularDiasAtraso) + lib/supabase.ts
+dados/page.tsx ──▶ api/dados (fetch) ──▶ lib/prioridade.ts (calcularDiasAtraso)
+                                      └─▶ lib/supabase-io.ts ──▶ lib/supabase.ts
 
-clientes/[id]/page.tsx ──▶ lib/format.ts + lib/supabase.ts
-                       (não usa lib/prioridade.ts — ordena por data_vencimento, não por urgência,
+clientes/[id]/page.tsx ──▶ lib/format.ts + lib/supabase-io.ts ──▶ lib/supabase.ts
+                       (não usa lib/prioridade.ts — exibe por data_vencimento, não por urgência,
                        o que faz sentido pra uma tela de histórico, não é bug)
+
+lib/importacao.ts ──▶ lib/csv-import.ts + tipos de lib/supabase-io.ts
+                   (NÃO importa lib/supabase.ts — recebe as operações de banco como parâmetro)
 
 proxy.ts — isolado, não depende de nenhum módulo de domínio
 ```
 
 Pontos a notar:
 
-- **`lib/supabase.ts` é o único nó compartilhado por quase todo o sistema** — 6 arquivos o
-  importam diretamente. Não existe indireção entre eles.
+- **`lib/supabase.ts` é o nó compartilhado por quase todo o sistema** — 7 arquivos o importam
+  diretamente (`actions/index.ts`, as 3 API routes, `page.tsx`, `clientes/[id]/page.tsx`,
+  `lib/recuperacao.ts`). Não existe indireção de tabela/coluna entre eles.
+- **`lib/supabase-io.ts` é atravessado por todos eles** — não substitui `lib/supabase.ts`, envolve
+  a chamada com prazo, classificação de falha e paginação.
 - **`lib/prioridade.ts` agora é usado pela Lista do Dia E por `/api/dados`** (para "valor
   vencido"). O histórico do cliente (`clientes/[id]/page.tsx`) continua sem usá-lo — por design,
   não por descuido: lá a ordenação é cronológica (mais recente primeiro), não por urgência.
@@ -171,18 +189,29 @@ por teste. Duas regras que a versão em lote precisa manter e que os testes prot
    obrigatório, não otimização.
 
 **A garantia de não-duplicidade é do banco.** `idx_titulos_aberto_unico`
-(`supabase/migration-02`) impede um segundo título `aberto` com o mesmo
+(`supabase/migration-02-titulo-aberto-unico.sql`, e também em `schema.sql` para bancos novos)
+impede um segundo título `aberto` com o mesmo
 (cliente, valor, vencimento). `planejarImportacao` continua decidindo em memória, mas como
 otimização e para *relatar* duplicatas — não como garantia: entre a consulta e o insert existe uma
 janela, e ela foi explorada sem malícia nenhuma (duas abas). Medido antes do índice: duas
 confirmações simultâneas de 40 linhas gravaram 80 títulos, ambas relatando "0 duplicatas"; na
 versão linha a linha da `main`, 75.
 
-Com o índice, o insert conflitante falha com **23505**, e `inserirComRetentativa` traduz isso para
-o que significa no domínio — "alguém já gravou isto" — reconsultando o que existe e reenviando só
-o que falta. O campo `duplicatas` soma as duas origens (detectadas na leitura + detectadas na
-gravação). A contagem de gravados vem de `.select('id')` no insert, ou seja, do que o banco
-aceitou, não do que foi pedido.
+Com o índice, o insert conflitante falha com **23505**, e `lib/importacao.ts::gravarLoteDeTitulos`
+traduz isso para o que significa no domínio — "alguém já gravou isto" — reconsultando o que existe
+e reenviando só o que falta. Esgotadas as tentativas, uma **conciliação final** relê o estado real:
+o que está no banco é duplicata, e só o que falta de verdade é reportado como não gravado. Sem esse
+passo o relatório inventava perda — medido: com 4 importações simultâneas de 120 linhas, as três
+perdedoras diziam "100 não gravadas" com as 120 no banco.
+
+O campo `duplicatas` soma as duas origens (detectadas na leitura + detectadas na gravação). A
+contagem de gravados vem de `.select('id')` no insert, ou seja, do que o banco aceitou, não do que
+foi pedido.
+
+Validado com o índice aplicado: **2 confirmações simultâneas × 40 linhas → 40 títulos** (uma
+reporta 40 gravados, a outra 40 duplicatas) e **4 × 120 → 120 títulos**; todas as requisições
+respondem `completo`, com `count + duplicatas + naoGravadas` fechando, e nenhuma apresenta erro ao
+usuário — porque não houve erro, só duas pessoas importando o mesmo arquivo.
 
 **Contrato de resposta** — `resultado` é `completo` | `parcial` | `indisponivel`. HTTP 200 para os
 dois primeiros (rejeição de linha por dado ruim é resposta legítima de import em lote); **503**
@@ -210,8 +239,13 @@ virava descarte silencioso na hora de gravar.
 Supabase: clientes (by id) + titulos JOIN interacoes (by cliente_id)
    → clientes/[id]/page.tsx (Server Component, renderização direta)
 ```
-Não passa por `lib/prioridade.ts`; a ordenação por urgência/status não existe aqui — a ordenação
-é por `data_vencimento` (mais recente primeiro).
+Não passa por `lib/prioridade.ts`; a ordenação por urgência/status não existe aqui — a exibição é
+por `data_vencimento` (mais recente primeiro).
+
+Detalhe que parece um erro e não é: a **consulta** ordena por `id`, não por `data_vencimento`. É
+exigência da paginação por cursor (a chave precisa ser única e estável, e `data_vencimento` não é);
+a ordem de exibição é reaplicada em memória depois de ler tudo. Não "conserte" trocando o
+`order('id')` da query pelo `order('data_vencimento')` — isso reintroduz leitura truncada.
 
 ### 4.4 Administração de dados (`/dados`)
 
@@ -248,7 +282,7 @@ era possível ver "0 títulos" por falha de leitura e clicar em "Limpar tudo" lo
 | Reconhecimento de colunas do CSV (aliases) | `lib/csv-import.ts::COLUMN_ALIASES` | Compartilhado por prévia e confirmação |
 | Normalização de valor/data/telefone do CSV | `lib/csv-import.ts` | Módulo de domínio sem I/O, testado (`csv-import.test.ts`) |
 | Revalidação estrutural de linha recebida | `lib/csv-import.ts::validarLinhaRecebida` | Usada por `confirmar/route.ts` antes de gravar — não existia antes |
-| Regra de duplicata na importação | `api/upload-csv/route.ts` (em memória) **e** `api/upload-csv/confirmar/route.ts` (query) | Implementada duas vezes **por design**: a segunda é uma checagem de segurança porque o estado pode ter mudado entre a prévia e a confirmação, não uma duplicação acidental |
+| Regra de duplicata na importação | `lib/csv-import.ts::planejarImportacao` (decisão) **+** `idx_titulos_aberto_unico` no Postgres (garantia) | Uma implementação só, chamada pela prévia e pela confirmação. A garantia real é do banco — a checagem em memória serve para relatar e evitar ida desnecessária |
 | "Valor vencido" nas estatísticas administrativas | `api/dados/route.ts` (via `calcularDiasAtraso`) | Reaproveita a fonte oficial — antes comparava strings ISO com lógica própria |
 | Formatação de moeda | `lib/format.ts::formatarMoeda` | Centralizado — antes reimplementado em 6 arquivos |
 | Autenticação | `proxy.ts` + `api/login/route.ts` | Rate limiting em memória + comparação constant-time |
@@ -282,7 +316,7 @@ deles.
 
 ## 6. Duplicações (resolvidas e restantes)
 
-**Resolvidas nesta rodada:**
+**Já resolvidas** (acumulado dos ciclos anteriores):
 
 - Formatação de moeda — centralizada em `lib/format.ts::formatarMoeda`, reaproveitada pelos 6
   arquivos que antes reimplementavam `toLocaleString('pt-BR', {style:'currency', currency:'BRL'})`.
@@ -300,11 +334,14 @@ deles.
   atraso com a mesma lógica de `calcularDiasAtraso` em vez de importá-la — `lib/templates.ts` é
   importado por `lib/prioridade.ts`, então importar na direção contrária criaria um ciclo entre os
   dois módulos. Resolver isso exigiria mover `calcularDiasAtraso` pra um terceiro módulo — trade-off
-  não feito nesta rodada por afetar a localização de uma regra de domínio central sem ganho
+  não feito por afetar a localização de uma regra de domínio central sem ganho
   imediato (as duas implementações são idênticas, não há evidência de terem divergido).
-- **Regra de duplicata de título** continua implementada duas vezes (em memória na prévia, via
-  query na confirmação) — isso é intencional, não uma duplicação por descuido: a confirmação
-  precisa reconferir porque o estado do banco pode ter mudado entre a prévia e a confirmação.
+- ~~**Regra de duplicata de título** implementada duas vezes~~ — **resolvido**: prévia e confirmação
+  chamam a mesma `lib/csv-import.ts::planejarImportacao`. A confirmação continua reconsultando o
+  banco (o estado pode ter mudado desde a prévia), mas a *decisão* é uma função só, e a *garantia*
+  passou a ser o índice único. Efeito colateral bom: a prévia passou a enxergar duplicata dentro do
+  próprio arquivo, que antes ela não via — um CSV com a linha repetida anunciava "2 prontos" e a
+  gravação importava 1.
 - **Detecção de separador de CSV em duas implementações**: uma ingênua no browser
   (`upload/page.tsx::analisarCSVLocal`, só olha se a primeira linha contém `;`/tab/vírgula, usada
   só pra um preview instantâneo antes do POST) e outra via PapaParse no servidor (autoritativa).
@@ -315,9 +352,12 @@ deles.
 
 ## 7. Pontos de acoplamento
 
-- **Acoplamento direto ao Supabase em 6 arquivos** — nomes de tabela e coluna como strings soltas
-  espalhadas pelo código (`.from('titulos')`, `.eq('status', 'aberto')`, etc.), sem abstração
-  intermediária.
+- **Acoplamento direto ao Supabase em 7 arquivos** — nomes de tabela e coluna como strings soltas
+  espalhadas pelo código (`.from('titulos')`, `.eq('status', 'aberto')`, etc.). `lib/supabase-io.ts`
+  não reduz esse acoplamento: ele envolve a chamada com política, mas não conhece tabela nem coluna.
+- **A paginação por cursor exige `id` no `select` e `order('id')`** em toda leitura de lista. É um
+  acoplamento novo, imposto pelo tipo (`T extends { id: string }`) para não ser esquecido. Quem
+  precisar de outra ordem para exibir tem de reordenar em memória (ver `clientes/[id]/page.tsx`).
 - **UI acoplada ao shape das respostas de API por convenção, não por tipo compartilhado** —
   `upload/page.tsx` declara `PreviewResult`/`ConfirmResult`/`LinhaValida` manualmente, duplicando
   (sem importar) o formato que as rotas de API realmente retornam. Uma mudança no backend não
@@ -349,7 +389,7 @@ deles.
 
 ## 9. Observações de segurança
 
-### Corrigido nesta rodada
+### Já corrigido (acumulado)
 
 - **`lib/supabase.ts` usava a chave ANÔNIMA (`NEXT_PUBLIC_SUPABASE_ANON_KEY`), não a
   `service_role`, desde o commit inicial do projeto** — apesar de `supabase/rls.sql` e o restante
@@ -377,7 +417,7 @@ deles.
   confirmação digitada pelo usuário, que seria mais fricção do que o risco justifica hoje).
 - Cookie de sessão agora marcado `secure` em produção (`NODE_ENV === 'production'`).
 
-### Ainda válidas / não endereçadas nesta rodada
+### Ainda válidas / não endereçadas
 
 - **`telefone` é a chave única de upsert de cliente** (`onConflict: 'telefone'`) — dois clientes
   reais com o mesmo número (erro de digitação, número corporativo compartilhado) se fundem
@@ -398,20 +438,17 @@ deles.
 
 - Sem camada de repositório: mudar um nome de coluna ou tabela exige busca manual em todos os
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
-- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `lib/prioridade.ts` e
-  `lib/csv-import.ts` (as duas áreas de maior risco financeiro/dado — score, categorização,
-  parsing de valor/data/telefone) agora têm suíte de testes (`vitest`, `npm run test`, 127 casos,
-  incluindo o planejamento da importação em lote, a reconciliação pós-conflito, a paginação por
-  cursor e a classificação de falha de I/O).
-  Ainda sem cobertura: Server Actions (`actions/index.ts`), as rotas de API como integração
-  (só testadas manualmente), e nenhum componente React. Mudar o corte de "7 dias" hoje quebraria
-  um teste se divergisse entre os módulos que o usam — antes não haveria nenhum sinal.
-  **Lacuna parcialmente fechada**: a decisão de o que fazer diante de um conflito de concorrência
-  saiu da rota para `lib/importacao.ts`, que recebe as operações de banco como parâmetro e por isso
-  é testável com dublês (`importacao.test.ts`). Foi feito porque a versão anterior, embutida na
-  rota, produziu dois defeitos que nenhum teste pegou — só a reprodução manual. **O que continua
-  sem cobertura**: o encadeamento HTTP das rotas, o comportamento sob dependência fora, e a
+- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **143 casos**, todos
+  em `src/lib/`. Cobrem score e categorização (`prioridade`), parsing e planejamento do lote
+  (`csv-import`), apuração (`recuperacao`), classificação de falha e paginação por cursor
+  (`supabase-io`) e a máquina de estados de conflito (`importacao`).
+  **O que continua sem cobertura**: Server Actions, as rotas de API como integração, componentes
+  React, o encadeamento HTTP entre UI e backend, o comportamento sob dependência indisponível e a
   concorrência real contra o Postgres. Esses seguem provados apenas por reprodução manual.
+  Vale registrar por quê isso importa: enquanto a lógica de conflito morava dentro da rota, ela
+  produziu **dois defeitos que nenhum teste pegou** — o SQLSTATE comparado contra a mensagem em vez
+  do código, e o relatório acusando perda inexistente. Os dois só apareceram na reprodução de ponta
+  a ponta. Foi o que motivou extrair `lib/importacao.ts` com I/O injetado.
 - **A confirmação da importação não é transacional.** O PostgREST não expõe transação entre
   requisições, então uma queda no meio deixa parte dos títulos gravados. Isso é tolerável só porque
   a reimportação é idempotente (garantida pelo índice único, não só pela checagem em memória) e a
@@ -421,12 +458,13 @@ deles.
   `onConflict` mira a PK e estoura 23505; e `onConflict` só aceita nomes de coluna, sem o predicado
   que o Postgres exige para inferir um índice parcial. Por isso a aplicação trata o 23505 em vez de
   pedir `DO NOTHING` — se um dia alguém quiser `DO NOTHING` de verdade aqui, o caminho é RPC.
-- **A lista do dia renderiza todos os clientes da fila de uma vez.** Com 1149 títulos em base de
-  teste, a home levou ~3,8s para montar 734 cards — o custo agora é render, não banco. Paginação de
-  UI continua fora de escopo, mas passa a ser o próximo gargalo real de percepção.
+- **A lista do dia renderiza todos os clientes da fila de uma vez.** Medido em base de teste:
+  ~3,8s para 734 cards (1149 títulos) e ~6,6s para 915 cards. O custo é **render, não banco** — a
+  consulta paginada responde em menos de 1s no mesmo cenário. Paginação de UI continua fora de
+  escopo por decisão, mas é o próximo gargalo real de percepção, e é decisão de produto.
 - `upload/page.tsx` tem ~500 linhas, misturando estado de formulário, chamadas de rede e três
   componentes de apresentação (`PreviewReport`, `ConfirmedReport`, `BreakdownRow`) no mesmo arquivo.
-  Não mexido nesta rodada — funcional, não é o gargalo atual.
+  Não mexido — funcional, não é o gargalo atual.
 - Rate limiting de login em memória (ver §9) não sobrevive a múltiplas instâncias — ok pra hoje,
   vira problema real se o deploy mudar de instância única pra serverless/múltiplas réplicas.
 
@@ -456,7 +494,7 @@ autenticação de senha única sem usuários individuais.
   é usada em nenhum outro lugar do sistema depois da importação — existe só para informar na tela
   de prévia. Continua assim — não é um problema, é intencional.
 - Não há forma de editar um cliente ou título já importado (nome/telefone errado) pela aplicação —
-  a única saída é apagar tudo em `/dados` ou alterar direto no banco. Não endereçado nesta rodada.
+  a única saída é apagar tudo em `/dados` ou alterar direto no banco. Não endereçado.
 - **"Limpar títulos pagos" destrói o histórico da receita recuperada.** A ação apaga as linhas
   pagas, e com elas o `resolvido_em` que sustenta a apuração dos últimos 30 dias — o valor
   simplesmente sai do número. Não é bug (a ação é declaradamente irreversível e a UI avisa), mas
@@ -478,11 +516,16 @@ autenticação de senha única sem usuários individuais.
   `lib/csv-import.ts`, compartilhado por `route.ts` (prévia) e `confirmar/route.ts` (gravação, que
   revalida antes de escrever). Mudar a forma esperada de uma linha provavelmente exige atualizar
   `validarLinhaRecebida` também, senão a confirmação passa a rejeitar dados válidos.
-- Se a mudança é sobre **acesso a dados**, não existe abstração para estender — é chamar
-  `lib/supabase.ts` diretamente, como todo o resto do código já faz. Isso é decisão consciente
-  de proporcionalidade pro estágio atual, não descuido — não introduza uma camada de repositório
-  sem uma razão concreta (mais de uma implementação de storage, necessidade real de mock em teste
-  de integração, etc.).
+- Se a mudança é sobre **acesso a dados**, a query continua sendo montada com `lib/supabase.ts`
+  direto — não existe repositório/DAO e não se deve introduzir um sem razão concreta (mais de uma
+  implementação de storage, necessidade real de mock em teste de integração). **Mas a chamada passa
+  por `lib/supabase-io.ts`**: `ler` / `lerPaginado` para leitura, `gravar` para escrita. Isso não é
+  opcional — é o que impede o `?? 0` de voltar e o que dá prazo e paginação. Nunca desestruture
+  `{ data }` de uma query ignorando o `error`.
+- Se a mudança é sobre **gravar títulos**, a decisão de o que fazer diante de um conflito vive em
+  `lib/importacao.ts`, que recebe as operações de banco como parâmetro e é testável com dublês.
+  Lógica que só é observável com banco real não deve voltar para dentro da rota — já produziu dois
+  defeitos ali (ver §10).
 - Se a mudança é sobre **quem aparece na lista do dia**, a regra é `lib/prioridade.ts::estaNaFilaHoje`
   e o único estado terminal é `pago` (ver §5). Antes de escrever qualquer filtro por status,
   pergunte se ele significa "ainda devido" (`!= 'pago'`) ou "encerrado" (`== 'pago'`) — usar

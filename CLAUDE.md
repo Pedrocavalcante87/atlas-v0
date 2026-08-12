@@ -40,9 +40,12 @@ precisa antes de tocar em qualquer coisa.
 9. **Segurança é requisito**, não opcional, em tudo que toca autenticação, o cookie de sessão,
    Supabase (service_role vs anon), dados de cliente/telefone, ou as rotas de importação/exclusão
    de dados. Nunca exponha secrets (ver `.env.local`, nunca commitado — está no `.gitignore`).
-10. **Teste o que alterar.** Existe suíte automatizada, mas ela cobre só o domínio sem I/O (ver
-    §Comandos) — rode `npm run test`, `npm run lint` e `npx tsc --noEmit`, e valide o fluxo
-    manualmente via `npm run dev` quando a mudança afetar UI, rota ou dado, que não têm cobertura.
+10. **Teste o que alterar.** A suíte cobre o domínio e a política de I/O, **não** rotas, Server
+    Actions nem componentes (ver §Comandos) — rode `npm run test`, `npm run lint` e
+    `npx tsc --noEmit`, e valide o fluxo manualmente via `npm run dev` quando a mudança afetar UI,
+    rota ou dado. Para concorrência, indisponibilidade ou qualquer coisa que envolva o banco de
+    verdade, teste unitário **não é evidência suficiente** — este projeto já produziu defeitos que
+    só apareceram na reprodução real (ver §Descobertas empíricas).
 11. **Revise criticamente depois de implementar.** Procure bug, regressão, edge case, duplicação
     nova, complexidade desnecessária e problema de segurança antes de considerar concluído.
 12. **Respeite o escopo.** Implemente o que foi pedido. Se achar problema não relacionado,
@@ -53,6 +56,57 @@ precisa antes de tocar em qualquer coisa.
 14. **Documentação no lugar certo.** Fato arquitetural novo vai para `ARCHITECTURE.md`; este
     arquivo (`CLAUDE.md`) é para regra de comportamento, contexto essencial e comandos — não para
     documentação extensa de sistema.
+15. **Documentação faz parte do trabalho, não vem depois dele.** Após qualquer alteração
+    importante no sistema, ou ao concluir um ciclo, a documentação operacional deve ser revisada e
+    atualizada **antes de considerar o ciclo encerrado**. Ver §Manutenção da documentação.
+
+---
+
+## Manutenção da documentação (regra permanente de processo)
+
+> **Uma alteração importante não está encerrada enquanto a documentação afetada estiver
+> desatualizada.** Documentação errada não é dívida cosmética: ela é ativamente perigosa, porque a
+> próxima sessão vai confiar nela e decidir errado. Trate afirmação falsa em documento como bug.
+
+### Quando revisar
+
+Ao concluir um ciclo, ou após qualquer mudança que altere comportamento, contrato, schema,
+garantia ou invariante. Não é preciso revisar tudo a cada commit — é preciso revisar **antes de
+declarar concluído**.
+
+### O que revisar (quando aplicável à mudança)
+
+| Documento | Revisar quando mudou |
+|---|---|
+| `CLAUDE.md` | Regra de atuação, invariante, decisão em vigor, comando, descoberta empírica, o que está fora de escopo |
+| `ARCHITECTURE.md` | Módulo, dependência, fluxo de dado, contrato de API, acoplamento, ponto frágil, limitação |
+| `README.md` | O que o produto faz, telas, formato de CSV, **estrutura do banco**, setup, roteiro de teste, limitação do v0 |
+| `supabase/*.sql` | Qualquer mudança de schema. Um banco NOVO só roda `schema.sql` — toda garantia criada por migration precisa existir lá também, senão instalação limpa nasce sem ela |
+| Cobertura de teste | Contagem de casos e **quais áreas seguem sem cobertura** — declarar cobertura que não existe é pior do que não declarar nada |
+
+### Precedência
+
+**Código, schema, testes e comportamento validado têm precedência sobre documentação antiga.**
+Divergiu? O documento está errado até prova em contrário — corrija o documento, não force o código
+a caber nele. Se o código é que está errado, isso é um bug, e vira tarefa própria.
+
+### O que preservar ao atualizar
+
+- **Decisões deliberadas fora de escopo.** Elas existem para não serem reabertas a cada ciclo por
+  preferência. Só saem de lá com evidência nova — e o registro deve dizer qual evidência.
+- **Descobertas empíricas** que mudaram uma decisão de implementação. Custaram medição; sem
+  registro, o próximo ciclo repete o experimento ou, pior, toma o caminho já descartado.
+- **A separação entre os cinco tipos de afirmação**, que não podem se misturar:
+
+  | Tipo | Significa | Como escrever |
+  |---|---|---|
+  | Regra de negócio | Contrato do domínio | "só `pago` é terminal" |
+  | Decisão arquitetural | Escolhido entre alternativas | "decidido: X, porque Y" |
+  | Implementação atual | Como está hoje, podia ser outra | "hoje a confirmação grava em lotes de 500" |
+  | Limitação conhecida | Sabemos, aceitamos, por ora | "não faz W — fora de escopo por N" |
+  | Hipótese não validada | Achamos, não medimos | "**hipótese**: … Como testar: …" |
+
+  Nunca promova hipótese a fato sem medição, e diga o que foi medido quando promover.
 
 ---
 
@@ -141,7 +195,7 @@ novo.
 | Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
 | Parse de CSV | PapaParse | ^5.5.4 |
 | Lint | ESLint | ^9, `eslint-config-next` |
-| Testes | Vitest | ^4 — só `lib/prioridade.ts` e `lib/csv-import.ts` têm cobertura |
+| Testes | Vitest | ^4 — 143 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
 
 ### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
 
@@ -161,15 +215,21 @@ npm run dev     # servidor de desenvolvimento (localhost:3000)
 npm run build   # build de produção
 npm run start   # serve o build de produção
 npm run lint    # ESLint
-npm run test    # vitest — só lib/prioridade.ts e lib/csv-import.ts têm testes
+npm run test    # vitest — 143 casos, todos em src/lib/
 ```
 
-Cobertura de teste é parcial, não total: só o domínio sem I/O (`lib/prioridade.ts`,
-`lib/csv-import.ts`) tem testes automatizados — são as duas áreas de maior risco financeiro/dado
-do sistema (score, categorização de urgência, parsing de valor/data/telefone de CSV). Server
-Actions, rotas de API e componentes React continuam sem teste automatizado — a verificação para
-essas partes é lint + type-check (`npx tsc --noEmit`, não tem script próprio) + execução manual
-via `npm run dev`.
+**O que tem cobertura** (`src/lib/*.test.ts`, 143 casos): `prioridade.ts` (score, categorização,
+reentrada), `csv-import.ts` (parsing, validação, planejamento do lote, deduplicação),
+`recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor) e
+`importacao.ts` (máquina de estados de conflito).
+
+**O que NÃO tem cobertura, e precisa de verificação manual**: rotas de API, Server Actions,
+componentes React, o encadeamento HTTP entre UI e backend, comportamento sob dependência
+indisponível, e concorrência real contra o Postgres. Para essas partes a verificação é
+`npm run lint` + `npx tsc --noEmit` (sem script próprio) + `npm run dev`.
+
+Não declare cobertura que não existe: afirmar que algo está testado quando não está é pior do que
+admitir a lacuna.
 
 ---
 
@@ -177,21 +237,32 @@ via `npm run dev`.
 
 ```
 src/
-├── app/            # rotas (App Router) + API routes em app/api/*/route.ts
-├── components/      # componentes de UI ('use client' onde há interação)
-├── lib/              # domínio sem I/O (prioridade, templates, csv-import, format) + client Supabase
-│   └── *.test.ts       # testes vitest de prioridade.ts e csv-import.ts (npm run test)
-├── actions/           # Server Actions ('use server')
-├── types/              # tipos TS compartilhados
-├── proxy.ts             # middleware de autenticação (ver aviso acima sobre Next 16)
+├── app/             # rotas (App Router) + API routes em app/api/*/route.ts
+├── components/       # componentes de UI ('use client' onde há interação)
+├── lib/
+│   ├── prioridade.ts   # domínio puro: urgência, score, fila do dia, agrupamento
+│   ├── templates.ts    # domínio puro: texto das mensagens
+│   ├── csv-import.ts   # domínio puro: parsing, validação, planejamento do lote
+│   ├── format.ts       # domínio puro: formatarMoeda
+│   ├── importacao.ts   # gravação do lote (conflito/conciliação) — I/O injetado, sem importar supabase
+│   ├── recuperacao.ts  # misto: apuração pura + uma leitura
+│   ├── supabase-io.ts  # POLÍTICA de I/O: prazo, classificação de falha, paginação
+│   ├── supabase.ts     # client Supabase (service_role, servidor-only)
+│   └── *.test.ts       # vitest (npm run test)
+├── actions/          # Server Actions ('use server')
+├── types/            # tipos TS compartilhados
+├── proxy.ts          # middleware de autenticação (ver aviso acima sobre Next 16)
 supabase/
-├── schema.sql            # DDL — rodar primeiro no SQL Editor do Supabase
-└── rls.sql                # habilita RLS sem políticas — rodar depois do schema
+├── schema.sql                            # DDL de banco NOVO — rodar primeiro
+├── rls.sql                               # habilita RLS sem políticas — rodar depois do schema
+├── migration-01-ciclo-operacional.sql    # silenciado_ate / resolvido_em (banco existente)
+└── migration-02-titulo-aberto-unico.sql  # índice único de título em aberto (banco existente)
 ```
 
-Não existe camada de repositório/DAO: toda leitura/escrita ao banco é feita chamando
-`lib/supabase.ts` diretamente de Server Components, Server Actions ou API routes. Isso é o padrão
-real do projeto — seguir o mesmo padrão em código novo é consistente com o resto, não é atalho.
+Não existe camada de repositório/DAO: quem precisa de dado monta a query com `lib/supabase.ts`
+direto, de Server Component, Server Action ou API route. **Mas a chamada passa por
+`lib/supabase-io.ts`** (`ler`/`lerPaginado`/`gravar`), que carrega a política de prazo, falha e
+paginação. Os dois juntos são o padrão real do projeto — não introduza repositório/DAO.
 
 ---
 
@@ -245,9 +316,10 @@ real do projeto — seguir o mesmo padrão em código novo é consistente com o 
   silenciosamente sob o mesmo registro — comportamento atual, não validado contra esse caso.
 - **Importação de CSV é sempre em duas chamadas**: `POST /api/upload-csv` só valida e retorna
   prévia (nada é gravado); `POST /api/upload-csv/confirmar` recebe de volta as linhas que o
-  próprio browser guardou da prévia e só então grava. As duas passam pela **mesma**
-  `lib/csv-import.ts::validarLinhaRecebida` — paridade por construção. Se mudar a regra de uma
-  linha válida, mude só lá.
+  próprio browser guardou da prévia e só então grava. As duas pontas compartilham **duas** funções
+  de `lib/csv-import.ts`, e é isso que garante que a prévia nunca prometa o que a gravação recusa:
+  `validarLinhaRecebida` (o que é uma linha válida) e `planejarImportacao` (o que conta como
+  duplicata, inclusive duplicata **dentro do próprio arquivo**). Mudou a regra? Mude só lá.
 - **Status de título**: `aberto | pago | promessa | sem_resposta` (CHECK constraint no banco,
   `supabase/schema.sql`). Toda mudança de status gera/atualiza uma linha em `interacoes` e
   reescreve `data_promessa`/`silenciado_ate`/`resolvido_em` juntos (`actions/index.ts`), para não
@@ -280,6 +352,27 @@ Decidido e implementado; mudar qualquer uma exige justificativa explícita, não
   camada de repositório — não conhece tabela nem regra, e a query continua sendo montada com
   `lib/supabase.ts` direto. Ele só carrega a política: prazo, classificação de falha e paginação.
   Ver §Leitura de listas e §Falha de dependência.
+- **Lógica que só é observável com banco real mora em `lib/`, com I/O injetado.**
+  `lib/importacao.ts` recebe as operações de banco como parâmetro (`Portas`) em vez de importar
+  `lib/supabase.ts`. Não é purismo: enquanto essa máquina de estados morava dentro da rota, ela
+  produziu dois defeitos que nenhum teste pegou. Se uma lógica nova só puder ser exercitada subindo
+  servidor, ela está no lugar errado.
+
+## Invariantes garantidos (o sistema deixa de funcionar corretamente se algum cair)
+
+Cada um está garantido por mecanismo, não por disciplina de quem escreve o código:
+
+| Invariante | Garantido por |
+|---|---|
+| Nenhum estado inventado quando o banco não responde | `ler`/`lerPaginado` lançam; rotas devolvem 503; nunca `?? 0` |
+| Leitura de lista é completa ou é erro — nunca truncada em silêncio | `lerPaginado` por cursor, `T extends { id: string }` |
+| No máximo um título `aberto` por (cliente, valor, vencimento) | `idx_titulos_aberto_unico` no Postgres |
+| Reimportar o mesmo arquivo não duplica cobrança | Índice único + tratamento de 23505 como duplicata |
+| Prévia nunca aprova linha que a gravação vá recusar | `validarLinhaRecebida` chamada nas duas pontas |
+| Prévia e confirmação contam duplicata igual | `planejarImportacao` chamada nas duas pontas |
+| Falha de infraestrutura nunca é apresentada como erro do dado do usuário | `ehFalhaDeInfraestrutura` + `resultado: 'indisponivel'` |
+| Nenhuma requisição fica pendurada indefinidamente | Prazos de 8s/15s em `supabase-io.ts` |
+| `service_role` nunca chega ao navegador | Só `lib/supabase.ts` a lê; nenhum Client Component o importa |
 
 ## Leitura de listas — o PostgREST corta em 1000 linhas
 
@@ -323,22 +416,44 @@ vazio enquanto havia dados, e a importação culpava linhas do CSV por uma queda
 - **Escrita não tem retry, e isso é decisão.** O `postgrest-js` só repete GET/HEAD/OPTIONS;
   reenviar um `insert` cuja resposta se perdeu duplicaria um título. Não reintroduza retry de
   escrita. A recuperação é reimportar — a checagem de duplicata torna isso idempotente.
-  (Exceção controlada: `inserirComRetentativa` reenvia após um **conflito de unicidade**, que é
-  outra coisa — ali o banco já garantiu que nada foi gravado em duplicidade, e o reenvio leva só
-  o que ainda não existe.)
+  (Exceção controlada: `lib/importacao.ts::gravarLoteDeTitulos` reenvia após um **conflito de
+  unicidade**, que é outra coisa — ali o banco já garantiu que nada foi gravado em duplicidade, e o
+  reenvio leva só o que ainda não existe.)
+- **Prazos em `lib/supabase-io.ts`: 8s leitura, 15s escrita.** Sem eles o padrão do undici é 300s —
+  medido: um fetch sem prazo contra uma dependência que aceita a conexão e não responde continuava
+  pendurado depois de 20s.
 
 ## Duplicidade de título é garantida pelo BANCO, não pela aplicação
 
-`idx_titulos_aberto_unico` (migration 02) é a fonte de verdade: no máximo um título `aberto` por
-(cliente, valor, vencimento). A checagem em memória (`planejarImportacao`) continua existindo para
-**relatar** duplicatas e evitar ida desnecessária ao banco — mas ela não é garantia, porque
-verificar-e-depois-escrever não é atômico. Já foi: duas abas importando o mesmo arquivo geravam
-cobrança em duplicidade com as duas telas dizendo "0 duplicatas".
+`idx_titulos_aberto_unico` (migration 02, **já aplicada no banco de desenvolvimento**) é a fonte de
+verdade: no máximo um título `aberto` por (cliente, valor, vencimento). A checagem em memória
+(`planejarImportacao`) continua existindo para **relatar** duplicatas e evitar ida desnecessária ao
+banco — mas ela não é garantia, porque verificar-e-depois-escrever não é atômico fora do banco.
 
 Consequência prática para quem mexer aqui: **um `insert` em `titulos` pode falhar com 23505 e isso
-não é erro** — é "alguém já gravou". Trate como duplicata (ver `inserirComRetentativa`), nunca como
-falha para o usuário.
-- Prazos em `lib/supabase-io.ts`: 8s leitura, 15s escrita. Sem eles o padrão do undici é 300s.
+não é erro** — é "alguém já gravou". Trate como duplicata (ver
+`lib/importacao.ts::gravarLoteDeTitulos`), nunca como falha para o usuário.
+
+O recorte `where status = 'aberto'` do índice é a regra de negócio, não detalhe: um título **pago**
+com os mesmos valores não bloqueia cobrança nova. Um índice sem esse recorte funcionaria melhor com
+o PostgREST (ver §Descobertas empíricas) mas mudaria a regra em silêncio — não faça essa troca.
+
+## Descobertas empíricas (medidas neste projeto — não redescubra)
+
+Cada item abaixo foi **verificado contra o Supabase real deste projeto** e mudou uma decisão de
+implementação. Não são hipóteses. Se alguma parecer errada, meça de novo antes de agir — mas meça.
+
+| Descoberta | Consequência no código |
+|---|---|
+| O PostgREST corta a resposta em **1000 linhas**. Com 1149 títulos não pagos, um `select` sem paginar devolveu 1000 e a soma saiu **R$ 137.287,50 menor**, com HTTP 200 | Toda leitura de lista usa `lerPaginado` |
+| Paginar por offset e parar quando "a página veio incompleta" só funciona se a página for ≤ o teto. Página 1500 contra teto 1000 leu 1000 de 1269 linhas | `lerPaginado` avança por **cursor** (`id`), nunca infere fim pelo tamanho |
+| `ignoreDuplicates` **sem** `onConflict` estoura 23505 — o PostgREST mira a PK, não emite `ON CONFLICT` nu | Não dá para pedir "ignore duplicatas" genericamente |
+| `onConflict` só aceita **nomes de coluna**, e o Postgres exige o predicado para inferir índice **parcial** | Por isso a aplicação trata o 23505 em vez de pedir `DO NOTHING`. Caminho alternativo seria RPC |
+| Erro do Postgres traz o SQLSTATE em `error.code`; a **mensagem não contém o número** | Discrimine erro específico por `Resultado.codigo`, nunca por `.includes()` na mensagem — isso já deixou um caminho inteiro morto |
+| Telefone repetido no mesmo `upsert` derruba o comando inteiro (SQLSTATE **21000**) | Deduplicar por telefone antes do lote é obrigatório |
+| `.select()` num upsert devolve **só as linhas realmente inseridas** | É daí que sai a contagem honesta de gravados |
+| Sem `AbortSignal`, o padrão do undici deixa um fetch pendurado (>20s medido; documentado 300s) | Prazos explícitos em `supabase-io.ts` |
+| `postgrest-js` repete só GET/HEAD/OPTIONS, 3× com backoff 1s/2s/4s | Leitura ganha teto de tempo; escrita não ganha retry |
 
 ## Fora de escopo por decisão (não implementar sem pedido explícito)
 
@@ -384,9 +499,8 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
 
 ## Pontos de segurança a ter em mente ao mexer perto
 
-> Atualizado após a rodada de hardening de segurança descrita em ARCHITECTURE.md §9
-> (branch `feature/revenue-recovery-hardening`). Os itens abaixo refletem o estado corrigido —
-> confira o código antes de assumir que continuam assim.
+> Os itens abaixo refletem o estado **corrigido** do código (histórico completo em
+> ARCHITECTURE.md §9). Confira o código antes de assumir que continuam assim.
 
 - `lib/supabase.ts` usa `SUPABASE_SERVICE_ROLE_KEY` (variável sem prefixo `NEXT_PUBLIC_`) — **antes
   usava a chave anônima por engano desde o commit inicial**, o que ou quebrava o app sob RLS ou
@@ -405,19 +519,15 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
 
 ---
 
-## Estado do git (snapshot observado — pode já ter mudado, sempre reconfira)
+## Estado do git
 
-Política de branches, commits e merge está em §Workflow Git — esta seção é só o snapshot factual
-mais recente, não regra.
+**Não existe snapshot confiável de estado de git em documento.** Rode `git status`,
+`git branch --show-current` e `git log --oneline main..HEAD` no início de qualquer trabalho — a
+política está em §Workflow Git. Uma versão anterior deste arquivo mantinha um snapshot com número
+de commit; ele envelheceu em dias e só servia para induzir erro.
 
-- No momento em que esta política foi escrita (commit `d354c90`), a `main` local estava sincronizada
-  com `origin/main` e o working tree limpo (sem alterações pendentes). Isso já mudou algumas vezes no
-  passado deste projeto — **não assuma o estado a partir deste texto**, rode `git status`/`git diff`
-  e confira a branch atual antes de avaliar o que já existe (ver regra obrigatória correspondente em
-  §Workflow Git).
-- O `src/middleware.ts` vazio e não rastreado que existia em versões anteriores deste arquivo não
-  está mais presente — resolvido. Fica como histórico: se reaparecer, é o mesmo problema que o
-  commit `d5f364d` já corrigiu antes (conflito com `src/proxy.ts`, que é o arquivo real e funcional).
+Único fato histórico que vale guardar: se um `src/middleware.ts` vazio reaparecer, ele conflita com
+`src/proxy.ts` (o arquivo real e funcional no Next 16) e deve ser removido — já aconteceu antes.
 
 ---
 
