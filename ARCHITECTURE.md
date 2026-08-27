@@ -1,14 +1,12 @@
 # Atlas — Arquitetura
 
-> ⚠️ **Escopo deste documento**: ele descreve o estado da branch de trabalho atual, que pode estar
-> à frente da `main`. Confira `git log --oneline main..HEAD` antes de assumir que o que está aqui
-> já está mergeado. Uma auditoria encontrou afirmações deste arquivo que haviam ficado falsas —
-> tratar documentação desatualizada como bug, não como tarefa cosmética.
->
-> Este documento descreve a arquitetura **real e atual** do projeto, como implementada no código.
-> Não é uma arquitetura alvo/idealizada — onde o sistema tem inconsistências, duplicações ou
-> soluções ad-hoc, isso está registrado aqui de propósito, para que qualquer pessoa que mexer
-> no código saiba o que vai encontrar antes de encontrar.
+> ⚠️ **Escopo deste documento**: ele descreve a arquitetura **real e atual**
+> do projeto, como implementada no código da `main`. Não é uma arquitetura
+> alvo/idealizada — onde o sistema tem inconsistências, duplicações ou
+> soluções ad-hoc, isso está registrado aqui de propósito. Antes de assumir
+> que uma afirmação daqui continua verdadeira, confira o código: uma auditoria
+> já encontrou afirmações deste arquivo que haviam ficado falsas, e
+> documentação desatualizada é bug, não tarefa cosmética.
 >
 > Para o que o produto faz e como usar, ver [README.md](README.md).
 
