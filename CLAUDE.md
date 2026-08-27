@@ -81,6 +81,7 @@ declarar concluído**.
 | `CLAUDE.md` | Regra de atuação, invariante, decisão em vigor, comando, descoberta empírica, o que está fora de escopo |
 | `ARCHITECTURE.md` | Módulo, dependência, fluxo de dado, contrato de API, acoplamento, ponto frágil, limitação |
 | `README.md` | O que o produto faz, telas, formato de CSV, **estrutura do banco**, setup, roteiro de teste, limitação do v0 |
+| `PLANEJAMENTO.md` | Direção de evolução pós-v0: fase concluída/autorizada, decisão de arquitetura pretendida, hipótese que virou fato, decisão aberta que foi respondida. **Não** é descrição do sistema atual — isso é `ARCHITECTURE.md` |
 | `supabase/*.sql` | Qualquer mudança de schema. Um banco NOVO só roda `schema.sql` — toda garantia criada por migration precisa existir lá também, senão instalação limpa nasce sem ela |
 | Cobertura de teste | Contagem de casos e **quais áreas seguem sem cobertura** — declarar cobertura que não existe é pior do que não declarar nada |
 
@@ -536,5 +537,10 @@ de commit; ele envelheceu em dias e só servia para induzir erro.
 - [README.md](README.md) — o que o produto faz, telas, formatos de CSV aceitos, roteiro de teste.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — módulos, dependências, fluxos de dados completos,
   duplicações, inconsistências arquiteturais e recomendações detalhadas.
+- [PLANEJAMENTO.md](PLANEJAMENTO.md) — planejamento da evolução pós-v0: onde o produto vai, o que
+  está autorizado a acontecer em seguida e o que ainda não está decidido. **Leia antes de propor
+  mudança estrutural em ingestão, schema ou domínio** — a Etapa 1 já avaliou várias direções e
+  registrou por que umas foram escolhidas e outras adiadas. Cada afirmação lá é marcada como fato,
+  decisão, hipótese ou decisão aberta; não trate hipótese como requisito.
 - [AGENTS.md](AGENTS.md) — aviso sobre breaking changes do Next.js 16 (importado no topo deste
   arquivo).
