@@ -1,0 +1,6 @@
+# Arquivos reais de contas a receber contêm nome, telefone e CPF/CNPJ de
+# pessoas — PII. Este repositório tem remote no GitHub. Nada desta pasta é
+# versionado, e isso é deliberado: a medição da Fase 0 precisa dos arquivos,
+# o repositório não.
+*
+!.gitignore
