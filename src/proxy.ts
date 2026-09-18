@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { sessaoValida } from '@/lib/sessao';
 
 const PUBLIC_PATHS = ['/login', '/api/login'];
+
+// O Proxy do Next 16 roda no runtime Node.js por padrão (e definir `runtime`
+// aqui lança erro), então `node:crypto` — usado por lib/sessao.ts — está
+// disponível. Confirmado em node_modules/next/dist/docs/01-app/03-api-reference/
+// 03-file-conventions/proxy.md §Runtime.
 
 export function proxy(request: NextRequest) {
   const appPassword = process.env.APP_PASSWORD;
@@ -26,8 +32,13 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const isAuthenticated =
-    request.cookies.get('atlas_auth')?.value === '1';
+  // O valor do cookie é assinado por lib/sessao.ts e a expiração é verificada
+  // aqui, no servidor. Antes esta linha comparava com a string literal '1':
+  // qualquer requisição com `Cookie: atlas_auth=1` entrava sem nunca ver a
+  // senha — inclusive nas rotas que expõem dados de clientes e apagam tudo.
+  // Cookie é dado do cliente; só vale o que o servidor consegue provar que
+  // emitiu.
+  const isAuthenticated = sessaoValida(appPassword, request.cookies.get('atlas_auth')?.value);
 
   if (!isAuthenticated) {
     return NextResponse.redirect(new URL('/login', request.url));
