@@ -6,6 +6,7 @@ import {
   COLUMN_ALIASES,
   detectarMapeamentoColunas,
   normalizarValor,
+  motivoValorRecusado,
   normalizarData,
   limparTelefone,
   dataEmFaixaRazoavel,
@@ -127,8 +128,12 @@ export async function POST(request: NextRequest) {
     const valorRaw = row[mapping.valor!]?.trim() ?? '';
     const valor = normalizarValor(valorRaw);
     if (isNaN(valor) || valor <= 0) {
-      linhasIgnoradas.push({ linha, nome, motivo: `Valor inválido — "${valorRaw}"` });
-      importErrors.push(`Linha ${linha}: valor inválido — "${valorRaw}".`);
+      // A recusa de um valor ambíguo ("1.500") precisa dizer como resolver —
+      // "valor inválido" mandaria procurar erro de digitação onde o problema é
+      // a convenção de milhar da planilha inteira (ver csv-import.ts).
+      const motivo = motivoValorRecusado(valorRaw);
+      linhasIgnoradas.push({ linha, nome, motivo });
+      importErrors.push(`Linha ${linha}: ${motivo}`);
       continue;
     }
 

@@ -196,7 +196,7 @@ novo.
 | Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
 | Parse de CSV | PapaParse | ^5.5.4 |
 | Lint | ESLint | ^9, `eslint-config-next` |
-| Testes | Vitest | ^4 — 168 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
+| Testes | Vitest | ^4 — 184 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
 
 ### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
 
@@ -216,10 +216,10 @@ npm run dev     # servidor de desenvolvimento (localhost:3000)
 npm run build   # build de produção
 npm run start   # serve o build de produção
 npm run lint    # ESLint
-npm run test    # vitest — 168 casos, todos em src/lib/
+npm run test    # vitest — 184 casos, todos em src/lib/
 ```
 
-**O que tem cobertura** (`src/lib/*.test.ts`, 168 casos): `prioridade.ts` (score, categorização,
+**O que tem cobertura** (`src/lib/*.test.ts`, 184 casos): `prioridade.ts` (score, categorização,
 reentrada), `csv-import.ts` (parsing, validação, planejamento do lote, deduplicação),
 `recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor),
 `importacao.ts` (máquina de estados de conflito) e `sessao.ts` (assinatura, expiração e recusa de
@@ -317,6 +317,24 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
 - **`telefone` é a chave de upsert de cliente** (`onConflict: 'telefone'` em
   `upload-csv/confirmar/route.ts`). Dois clientes reais com o mesmo número se fundem
   silenciosamente sob o mesmo registro — comportamento atual, não validado contra esse caso.
+- **`55` no início de um telefone não prova que há DDI — 55 também é o DDD de Santa Maria/RS.**
+  `limparTelefone` desempata pelo comprimento: número brasileiro com DDI tem 12 (fixo) ou 13
+  (celular) dígitos; com 10 ou 11 o `55` é DDD e o país falta. A versão anterior olhava só o
+  prefixo, e um celular `(55) 99999-8888` ia para o banco sem DDI, passava a validação de 10–15
+  dígitos e mandava a cobrança para outro número pelo `wa.me`.
+- **Valor ambíguo é recusado, nunca adivinhado.** `normalizarValor` devolve `NaN` para `"1.500"`
+  (um ponto, exatamente três dígitos) porque mil-e-quinhentos e um-e-cinquenta são leituras
+  igualmente válidas. Antes assumia decimal e gravava R$ 1,50 no lugar de R$ 1.500, calado.
+  **Não "conserte" isso escolhendo a convenção BR** — consertaria o arquivo brasileiro e passaria
+  a cobrar 1000x a mais de quem exporta em US. A saída certa é decidir por coluna (Fase 1). Quem
+  transforma a recusa em mensagem acionável é `motivoValorRecusado`, usada por
+  `api/upload-csv/route.ts`. Casos com leitura única continuam aceitos: `1.234.567` = milhar,
+  `1500.00` = decimal.
+- **Data impossível é recusada no parse, não adiante.** `normalizarData` valida mês 1–12 e dia
+  1–31 em todos os formatos. Antes, um arquivo americano (`10/25/2026`) virava `"2026-25-10"` e
+  só era barrado por `dataEmFaixaRazoavel`, com a mensagem errada ("mais de 5 anos no passado ou
+  no futuro"). **O que continua irredutível**: `03/04/2026` é válido nas duas convenções e entra
+  como DD/MM — só a coluna inteira pode provar o contrário (Fase 1).
 - **Importação de CSV é sempre em duas chamadas**: `POST /api/upload-csv` só valida e retorna
   prévia (nada é gravado); `POST /api/upload-csv/confirmar` recebe de volta as linhas que o
   próprio browser guardou da prévia e só então grava. As duas pontas compartilham **duas** funções

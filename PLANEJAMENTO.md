@@ -180,20 +180,46 @@ para a contabilidade. Não há noção de _tipo de conjunto de dados_: há um fo
 `normalizarValor` (`src/lib/csv-import.ts`) decide a convenção de milhar/decimal olhando **cada
 célula isoladamente**. Verificado nesta etapa executando a função com Node:
 
-| Entrada       | Resultado |                                                                  |
-| ------------- | --------- | ---------------------------------------------------------------- |
-| `"1,500"`     | `1500`    | ✅ tratado e coberto por teste (vírgula com 3+ dígitos = milhar) |
-| `"1.500"`     | `1.5`     | ❌ **R$ 1.500 é gravado como R$ 1,50**                           |
-| `"R$ 1.500"`  | `1.5`     | ❌ idem                                                          |
-| `"1.234.567"` | `1.234`   | ❌ inequivocamente errado (dois pontos não podem ser decimal)    |
-| `"2.850"`     | `2.85`    | ❌                                                               |
+**Estado em 2026-09-19, depois da correção descrita abaixo** — [FATO], verificado executando a
+função e coberto por teste:
 
-O caso **US** (vírgula como milhar) é tratado e testado; o caso **BR** (ponto como milhar, sem
-decimais) não é — num produto cujo domínio inteiro é em português. O valor errado passa em
-`validarLinhaRecebida` (é > 0) e entra no banco silenciosamente, dividido por 1000.
+| Entrada       | Antes     | Agora       |                                                             |
+| ------------- | --------- | ----------- | ----------------------------------------------------------- |
+| `"1,500"`     | `1500`    | `1500`      | ✅ inalterado (vírgula com 3+ dígitos = milhar)             |
+| `"1.234.567"` | `1.234`   | `1234567`   | ✅ **corrigido** — dois pontos só podem ser milhar          |
+| `"1.500"`     | `1.5`     | **recusa**  | ✅ **não grava mais valor errado** — ver abaixo             |
+| `"R$ 1.500"`  | `1.5`     | **recusa**  | ✅ idem                                                     |
+| `"2.850"`     | `2.85`    | **recusa**  | ✅ idem                                                     |
+| `"1.500.00"`  | `150000`  | **recusa**  | ✅ não é milhar nem decimal em convenção nenhuma            |
+| `"1500.00"`   | `1500`    | `1500`      | ✅ inalterado (um ponto, 2 dígitos = decimal)               |
+
+> **Correção aplicada em 2026-09-19** — [DECISÃO]. Duas mudanças, de naturezas diferentes:
+>
+> 1. **O inequívoco foi corrigido.** Dois ou mais pontos não têm leitura alternativa (não existe
+>    número com duas partes decimais), então tratá-los como milhar não é escolher — é a única
+>    leitura possível. `parseFloat('1.234.567')` parava no segundo ponto e devolvia `1.234`.
+> 2. **O ambíguo passou a ser recusado, não adivinhado.** `"1.500"` é mil e quinhentos em BR e um e
+>    meio em US; a célula sozinha não decide. O sistema agora **rejeita a linha com um motivo que
+>    diz como resolver** (`motivoValorRecusado`), em vez de gravar R$ 1,50 em silêncio.
+>
+> **Por que recusar e não escolher a leitura BR**: assumir milhar consertaria o arquivo brasileiro
+> e passaria a cobrar **1000x a mais** de quem exporta em US — trocaria um erro silencioso por
+> outro, na direção pior. Recusar honra o invariante do [CLAUDE.md](CLAUDE.md) ("números de
+> dinheiro nunca são inventados") e a barreira #5 do §9 deste documento ("célula que não parseia
+> vira linha rejeitada com motivo, nunca valor adivinhado"), que estava declarada em vigor mas não
+> era cumprida justamente aqui.
+>
+> **Isto não antecipa nem bloqueia a Fase 1.** Nenhuma convenção foi escolhida por célula — ao
+> contrário, o código passou a decidir *menos*. Quando o formato for decidido por coluna (§11.2),
+> estas linhas voltam a ser aceitas, com o valor certo, e `normalizarValor` deixa de ser o último
+> a opinar.
+>
+> **Custo aceito, não medido**: arquivos que hoje importam (com valor errado) passam a ter linhas
+> recusadas. Quantos arquivos reais caem nesse caso segue sendo [HIPÓTESE] — é o que a Fase 0
+> responde.
 
 **Como re-verificar**: extrair `normalizarValor` para um script e rodar contra a tabela acima, ou
-adicionar os casos a `src/lib/csv-import.test.ts`.
+ler `src/lib/csv-import.test.ts` (blocos `normalizarValor` e `motivoValorRecusado`).
 
 **Por que isto importa além do bug**: `"1.500"` é genuinamente ambíguo _em uma célula_ e trivial
 _na coluna inteira_ (se qualquer valor da coluna tem vírgula decimal, ou se todos os grupos após
@@ -559,6 +585,23 @@ alterar código de produção, schema ou UI.
 ❌ Corrigir o defeito do §5.3 fora do planejamento da Fase 1 — a correção correta é estrutural
 (decisão por coluna), e um remendo por célula agora fecharia a porta para ela.
 ❌ Introduzir dependência de IA ou chamada a provedor de modelo.
+
+### Exceções abertas pelo usuário depois desta etapa
+
+Este documento restringe **planejamento**, não emergência nem defeito presente. As exceções abaixo
+foram pedidas explicitamente pelo usuário e ficam registradas para que a restrição geral continue
+valendo para tudo o mais:
+
+| Data       | O que                                                                 | Por quê                                                                                                                      |
+| ---------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-18 | Cookie de sessão assinado (`src/lib/sessao.ts`, `proxy.ts`, `api/login`) | O cookie era o literal `'1'` e autenticava qualquer requisição. Defeito de segurança presente, sem relação com a Fase 1       |
+| 2026-09-19 | Parsing determinístico (`src/lib/csv-import.ts`): telefone, data, valor com 2+ pontos | Três defeitos onde **só existe uma leitura possível**. Nenhum decide entre alternativas, então nenhum fecha porta da Fase 1 |
+| 2026-09-19 | Valor ambíguo (`"1.500"`) passa a ser **recusado com motivo**, não adivinhado | Decisão do usuário. Não escolhe convenção — faz o código decidir *menos*. Ver §5.3 |
+
+**A restrição do §5.3 continua de pé onde importa**: nenhuma convenção de milhar/decimal foi
+escolhida por célula. A correção estrutural (decidir por coluna, com confirmação) segue sendo da
+Fase 1 e segue inteiramente possível — o que mudou é que, até lá, o sistema recusa em vez de
+gravar um número que pode estar errado.
 
 ### Critério de entrada da Etapa 2
 
