@@ -346,7 +346,7 @@ uma cobrança nova.
 | Banco de dados | Supabase (PostgreSQL) |
 | Parse de CSV | PapaParse |
 | Autenticação | Cookie HTTP-only assinado (HMAC) + proxy |
-| Testes | Vitest (184 casos, domínio, política de I/O e sessão) |
+| Testes | Vitest (193 casos, domínio, política de I/O e sessão) |
 
 ---
 

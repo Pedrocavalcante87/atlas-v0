@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 import { criarValorDeSessao, DURACAO_SESSAO_MS } from '@/lib/sessao';
+import { criarLimitador } from '@/lib/rate-limit';
 
 // ---------------------------------------------------------------------------
 // Rate limiting em memória por IP — suficiente para dificultar força bruta
@@ -9,26 +10,18 @@ import { criarValorDeSessao, DURACAO_SESSAO_MS } from '@/lib/sessao';
 // entre múltiplas instâncias — se o Atlas passar a rodar em múltiplas
 // instâncias/serverless com cold starts frequentes, isso precisa virar um
 // store compartilhado (ex: tabela no próprio Supabase). Não é o caso agora.
+//
+// A mecânica (janela, contagem e o expurgo das entradas velhas) vive em
+// `lib/rate-limit.ts` porque só é observável ao longo do tempo: lá o "agora" é
+// parâmetro e o teste acerta o relógio. Aqui ficam apenas os números em vigor.
 // ---------------------------------------------------------------------------
 const JANELA_MS = 5 * 60 * 1000; // 5 minutos
 const MAX_TENTATIVAS = 10;
-const tentativasPorIp = new Map<string, { count: number; resetAt: number }>();
+
+const limitador = criarLimitador({ janelaMs: JANELA_MS, maxTentativas: MAX_TENTATIVAS });
 
 function ipDoRequest(request: NextRequest): string {
   return request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
-}
-
-function excedeuLimite(ip: string): boolean {
-  const agora = Date.now();
-  const registro = tentativasPorIp.get(ip);
-
-  if (!registro || agora > registro.resetAt) {
-    tentativasPorIp.set(ip, { count: 1, resetAt: agora + JANELA_MS });
-    return false;
-  }
-
-  registro.count++;
-  return registro.count > MAX_TENTATIVAS;
 }
 
 /** Comparação em tempo constante — evita vazar por timing quantos caracteres
@@ -53,7 +46,7 @@ export async function POST(request: NextRequest) {
   }
 
   const ip = ipDoRequest(request);
-  if (excedeuLimite(ip)) {
+  if (limitador.excedeu(ip)) {
     return NextResponse.json(
       { error: 'Muitas tentativas. Aguarde alguns minutos antes de tentar de novo.' },
       { status: 429 },

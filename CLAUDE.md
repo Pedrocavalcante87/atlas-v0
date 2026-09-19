@@ -196,7 +196,7 @@ novo.
 | Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
 | Parse de CSV | PapaParse | ^5.5.4 |
 | Lint | ESLint | ^9, `eslint-config-next` |
-| Testes | Vitest | ^4 — 184 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
+| Testes | Vitest | ^4 — 193 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
 
 ### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
 
@@ -216,14 +216,14 @@ npm run dev     # servidor de desenvolvimento (localhost:3000)
 npm run build   # build de produção
 npm run start   # serve o build de produção
 npm run lint    # ESLint
-npm run test    # vitest — 184 casos, todos em src/lib/
+npm run test    # vitest — 193 casos, todos em src/lib/
 ```
 
-**O que tem cobertura** (`src/lib/*.test.ts`, 184 casos): `prioridade.ts` (score, categorização,
+**O que tem cobertura** (`src/lib/*.test.ts`, 193 casos): `prioridade.ts` (score, categorização,
 reentrada), `csv-import.ts` (parsing, validação, planejamento do lote, deduplicação),
 `recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor),
-`importacao.ts` (máquina de estados de conflito) e `sessao.ts` (assinatura, expiração e recusa de
-cookie forjado).
+`importacao.ts` (máquina de estados de conflito), `sessao.ts` (assinatura, expiração e recusa de
+cookie forjado) e `rate-limit.ts` (janela, reinício e expurgo de entradas velhas).
 
 **O que NÃO tem cobertura, e precisa de verificação manual**: rotas de API, Server Actions,
 componentes React, o encadeamento HTTP entre UI e backend, comportamento sob dependência
@@ -251,6 +251,7 @@ src/
 │   ├── supabase-io.ts  # POLÍTICA de I/O: prazo, classificação de falha, paginação
 │   ├── supabase.ts     # client Supabase (service_role, servidor-only)
 │   ├── sessao.ts       # domínio puro: assina/valida o cookie de sessão (HMAC + expiração)
+│   ├── rate-limit.ts   # domínio puro: janela de tentativas por chave, com expurgo
 │   └── *.test.ts       # vitest (npm run test)
 ├── actions/          # Server Actions ('use server')
 ├── types/            # tipos TS compartilhados
@@ -549,8 +550,16 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   Next 16 avisa que mudar o matcher ou mover a ação de rota remove a proteção em silêncio (ver
   ARCHITECTURE.md §9). Ao tocar `actions/index.ts`, considere validar a sessão no topo da ação.
 - Comparação de senha em `api/login/route.ts` usa `crypto.timingSafeEqual` (constant-time).
-- Login tem rate limiting em memória (10 tentativas / 5 min / IP) — não sobrevive a restart nem é
-  compartilhado entre instâncias; ok para o deploy de instância única atual, revisar se isso mudar.
+- Login tem rate limiting em memória (10 tentativas / 5 min / IP), com a mecânica em
+  `lib/rate-limit.ts` — não sobrevive a restart nem é compartilhado entre instâncias; ok para o
+  deploy de instância única atual, revisar se isso mudar. As entradas expiradas são expurgadas:
+  antes só saíam se o mesmo IP voltasse, então o mapa crescia sem teto.
+- **Falha de Server Action precisa ser tratada por quem chama.** `registrarEnvio` e
+  `atualizarStatusTitulo` lançam de propósito (o histórico é a única prova de que a cobrança
+  aconteceu). `ClienteCard` não capturava, e o resultado era o pior dos dois mundos: o WhatsApp
+  abria, o botão travava em "Registrando envio..." e o registro não existia. Ao chamar uma Server
+  Action de um componente, trate a rejeição e mostre o que falhou — em lote, com
+  `Promise.allSettled`, para saber **quantos** falharam.
 
 ---
 

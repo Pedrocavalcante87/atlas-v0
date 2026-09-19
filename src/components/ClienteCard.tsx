@@ -25,6 +25,7 @@ function linkWhatsApp(telefone: string, mensagem: string) {
 export default function ClienteCard({ grupo }: Props) {
   const [enviando, setEnviando] = useState(false);
   const [enviado, setEnviado] = useState(false);
+  const [erro, setErro] = useState('');
   const { cliente, titulos, valorTotal, categoriaMaisUrgente, mensagemConsolidada } = grupo;
 
   // categoriaMaisUrgente já vem calculada por agruparPorCliente() com a mesma
@@ -40,11 +41,37 @@ export default function ClienteCard({ grupo }: Props) {
 
   async function handleEnviar() {
     setEnviando(true);
+    setErro('');
+
     // Registra a interação em CADA título aberto desse cliente — assim o
     // histórico individual de cada um mostra que essa mensagem foi enviada,
     // mesmo que o usuário nunca volte pra marcar um resultado depois.
-    await Promise.all(titulos.map((t) => registrarEnvio(t.id, mensagemConsolidada)));
+    //
+    // `allSettled`, não `all`: o clique já abriu o WhatsApp numa aba nova, e
+    // `all` rejeitaria no primeiro erro sem dizer quantos dos outros títulos
+    // chegaram a ser registrados. Num cliente com 3 títulos, "falhou" e
+    // "falhou 1 de 3" são situações diferentes para quem vai conferir depois.
+    const resultados = await Promise.allSettled(
+      titulos.map((t) => registrarEnvio(t.id, mensagemConsolidada)),
+    );
+    const falhas = resultados.filter((r) => r.status === 'rejected').length;
+
     setEnviando(false);
+
+    // Sem este tratamento a rejeição ficava sem dono: o botão travava em
+    // "Registrando envio..." para sempre e o usuário seguia para o WhatsApp
+    // achando que a cobrança tinha sido registrada. `registrarEnvio` falha
+    // alto de propósito (actions/index.ts) justamente para que a perda do
+    // histórico não passe despercebida — quem chama precisa mostrar isso.
+    if (falhas > 0) {
+      setErro(
+        falhas === titulos.length
+          ? 'A mensagem foi aberta, mas o envio não ficou registrado. Tente de novo.'
+          : `A mensagem foi aberta, mas ${falhas} de ${titulos.length} títulos não tiveram o envio registrado. Tente de novo.`,
+      );
+      return;
+    }
+
     setEnviado(true);
   }
 
@@ -83,6 +110,14 @@ export default function ClienteCard({ grupo }: Props) {
         >
           📱 {enviando ? 'Registrando envio...' : enviado ? 'Enviado — clique pra reenviar' : 'Enviar via WhatsApp'}
         </a>
+
+        {/* Mesmo padrão de aviso do TituloCard: falha de gravação não pode
+            passar como sucesso. Aqui é especialmente importante porque o
+            WhatsApp já abriu — a cobrança foi feita, só o registro dela é que
+            não existe, e quem olhar o histórico depois não vai saber disso. */}
+        {erro && (
+          <p className="text-xs text-red-600 -mt-1 mb-3 font-medium">⚠ {erro}</p>
+        )}
 
         <div className="space-y-1.5">
           {titulos.map((t) => (

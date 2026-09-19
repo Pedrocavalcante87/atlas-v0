@@ -51,6 +51,7 @@ um repositório; ela impede que cada ponto de chamada invente o próprio tratame
 | **Administração** | `src/app/dados/page.tsx`, `src/app/api/dados/route.ts` | Estatísticas agregadas + limpeza destrutiva de dados (protegida por frase de confirmação) |
 | **Acesso a dados** | `src/lib/supabase.ts` | Client Supabase único (service_role), lazy-init via Proxy |
 | **Política de I/O** | `src/lib/supabase-io.ts` | Prazo (8s leitura / 15s escrita), classificação infra × banco, paginação por cursor, e leitura que lança em vez de devolver vazio |
+| **Limite de tentativas** | `src/lib/rate-limit.ts` | Janela, contagem por chave e expurgo das entradas expiradas, com o "agora" injetável. Estado por processo — não sobrevive a restart nem é compartilhado entre instâncias |
 | **Gravação da importação** | `src/lib/importacao.ts` | Máquina de estados que grava um lote convivendo com o índice único: conflito vira duplicata, e a conciliação final diz o que de fato ficou no banco. Recebe as operações de banco como parâmetro (`Portas`), então é testável com dublês |
 | **Layout / navegação** | `src/app/layout.tsx`, `src/components/Navbar.tsx`, `src/components/NavbarWrapper.tsx` | Casca visual, esconde navbar no login |
 
@@ -71,7 +72,8 @@ está fora", e paginação. Existe porque a alternativa (repetir `if (error)` em
 justamente o que falhou: `?? 0` espalhado por `/api/dados` transformava apagão em R$ 0,00.
 
 **Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`,
-`supabase-io.test.ts`, `importacao.test.ts`, `sessao.test.ts`. `lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
+`supabase-io.test.ts`, `importacao.test.ts`, `sessao.test.ts`, `rate-limit.test.ts`.
+`lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
 Server Action ou componente React tem cobertura — a verificação deles é manual (`npm run dev`) ou
 via E2E ad-hoc.
 
@@ -420,10 +422,14 @@ deles.
   autenticado montado manualmente com dados fora desse formato é rejeitado, em vez de gravado
   como estava antes.
 - **Comparação de senha agora é constant-time** (`crypto.timingSafeEqual` em `api/login/route.ts`).
-- **Rate limiting em memória no login** — 10 tentativas por IP a cada 5 minutos. Limitação
-  conhecida: não sobrevive a restart do processo nem é compartilhado entre múltiplas instâncias;
-  suficiente para o deploy de instância única do Atlas hoje, não para um deploy serverless/multi-
-  instância (ver comentário no arquivo).
+- **Rate limiting em memória no login** — 10 tentativas por IP a cada 5 minutos, com a mecânica em
+  `lib/rate-limit.ts` (testada com o relógio injetado; verificada também contra a rota: a 11ª
+  tentativa devolve 429, IPs distintos não se afetam, e um IP bloqueado é barrado mesmo com a senha
+  certa). **As entradas expiradas passaram a ser expurgadas** — antes um registro só era removido
+  se aquele mesmo IP voltasse depois da janela, então IPs que apareciam uma vez ficavam para
+  sempre, e o mapa crescia sem teto num processo de longa duração. Limitação conhecida e mantida:
+  não sobrevive a restart do processo nem é compartilhado entre múltiplas instâncias; suficiente
+  para o deploy de instância única do Atlas hoje, não para serverless/multi-instância.
 - **`DELETE /api/dados?modo=tudo` agora exige a frase `"EXCLUIR TUDO"` no corpo da requisição**,
   além da senha do app — eleva a barra de "só ter o cookie" pra "precisa conhecer o contrato exato
   da API", uma defesa em profundidade proporcional ao estágio do produto (não um fluxo de
@@ -462,7 +468,7 @@ deles.
 
 - Sem camada de repositório: mudar um nome de coluna ou tabela exige busca manual em todos os
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
-- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **184 casos**, todos
+- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **193 casos**, todos
   em `src/lib/`. Cobrem score e categorização (`prioridade`), parsing e planejamento do lote
   (`csv-import`), apuração (`recuperacao`), classificação de falha e paginação por cursor
   (`supabase-io`), a máquina de estados de conflito (`importacao`) e a assinatura/expiração do
@@ -525,6 +531,12 @@ autenticação de senha única sem usuários individuais.
   simplesmente sai do número. Não é bug (a ação é declaradamente irreversível e a UI avisa), mas
   passou a ter um custo que antes não existia. Se a apuração virar algo que a empresa acompanha
   ao longo do tempo, essa ação precisa ser repensada — decisão de produto, não tomada aqui.
+- ~~`ClienteCard` engolia a falha ao registrar o envio~~ — **resolvido**: `handleEnviar` não
+  tratava a rejeição de `registrarEnvio`, então o botão travava em "Registrando envio..." e o
+  usuário seguia para o WhatsApp achando que a cobrança fora registrada — exatamente a perda
+  silenciosa de histórico que `actions/index.ts` passou a evitar falhando alto. Agora usa
+  `Promise.allSettled` (para saber **quantos** dos títulos do cliente falharam, não só que houve
+  falha) e mostra o aviso no mesmo padrão do `TituloCard`.
 - **Os templates de mensagem não sabem que houve promessa quebrada.** Um título que reentra usa o
   template da categoria de urgência dele. Para o caso comum (título vencido) o texto serve; para
   uma promessa sobre título ainda a vencer, a mensagem fala de vencimento e ignora o combinado.
