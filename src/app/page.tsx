@@ -3,7 +3,8 @@ import { priorizarTitulos, agruparPorCliente } from '@/lib/prioridade';
 import { totalRecuperado, JANELA_RECUPERACAO_DIAS } from '@/lib/recuperacao';
 import { lerPaginado, SupabaseIndisponivelError } from '@/lib/supabase-io';
 import { Titulo, Cliente } from '@/types';
-import ClienteCard from '@/components/ClienteCard';
+import FilaCobranca from '@/components/FilaCobranca';
+import KpiCard from '@/components/ui/KpiCard';
 import { formatarMoeda } from '@/lib/format';
 import Link from 'next/link';
 
@@ -40,7 +41,7 @@ export default async function HomePage() {
     const mensagem =
       e instanceof SupabaseIndisponivelError ? e.message : 'Erro inesperado ao carregar os dados.';
     return (
-      <main className="max-w-5xl mx-auto px-5 py-8">
+      <main className="max-w-6xl mx-auto px-5 py-8">
         <div
           role="alert"
           className="bg-risco-50 border border-risco-200 rounded-md px-4 py-3 text-base text-risco-700"
@@ -72,54 +73,38 @@ export default async function HomePage() {
   });
 
   return (
-    <main className="max-w-5xl mx-auto px-5 py-7">
+    <main className="max-w-6xl mx-auto px-5 py-7">
 
       <div className="mb-6">
         <h1 className="text-titulo font-semibold text-texto tracking-[-0.01em]">Lista do dia</h1>
         <p className="text-corpo text-texto-suave capitalize mt-0.5">{hoje}</p>
       </div>
 
-      {/* Indicadores. Uma faixa dividida por bordas verticais, não quatro
-          cartões soltos: são quatro leituras do MESMO estado, e separá-los em
-          caixas sugeria que não se relacionam.
-          O recuperado aparece mesmo com a fila vazia — dia sem ninguém pra
-          cobrar é justamente quando o resultado importa. */}
+      {/* Indicadores em cards. O recuperado aparece mesmo com a fila vazia —
+          dia sem ninguém pra cobrar é justamente quando o resultado importa. */}
       {(priorizados.length > 0 || (recuperado ?? 0) > 0) && (
-        <div className="grid grid-cols-2 md:grid-cols-4 bg-superficie border border-borda rounded-lg mb-6 divide-y divide-borda md:divide-y-0 md:divide-x">
-          <div className="px-4 py-3.5">
-            <p className="text-legenda text-texto-suave mb-1">Vencidos</p>
-            <p className="text-cifra font-semibold text-risco-600 numero leading-none">
-              {vencidos.length}
-            </p>
-          </div>
-          <div className="px-4 py-3.5">
-            <p className="text-legenda text-texto-suave mb-1">A vencer</p>
-            <p className="text-cifra font-semibold text-atencao-600 numero leading-none">
-              {preventivos.length}
-            </p>
-          </div>
-          <div className="px-4 py-3.5">
-            <p className="text-legenda text-texto-suave mb-1">Em risco</p>
-            <p className="text-cifra font-semibold text-texto numero leading-none truncate">
-              {formatarMoeda(valorEmRisco)}
-            </p>
-          </div>
-          <div className="px-4 py-3.5 bg-marca-50/60">
-            <p className="text-legenda text-marca-700 mb-1">
-              Recuperado
-              <span className="text-texto-fraco font-normal">
-                {recuperado === null ? '' : ` · ${JANELA_RECUPERACAO_DIAS} dias`}
-              </span>
-            </p>
-            {/* null = a apuração falhou. Mostrar "—" em vez de R$ 0,00: zero
-                seria uma afirmação falsa sobre dinheiro. */}
-            <p className="text-cifra font-semibold text-marca-700 numero leading-none truncate">
-              {recuperado === null ? '—' : formatarMoeda(recuperado)}
-            </p>
-            {recuperado === null && (
-              <p className="text-legenda text-texto-fraco mt-1">indisponível</p>
-            )}
-          </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <KpiCard rotulo="Vencidos" valor={vencidos.length} tom="risco" nota="títulos em atraso" />
+          <KpiCard
+            rotulo="A vencer"
+            valor={preventivos.length}
+            tom="atencao"
+            nota="vencem em até 3 dias"
+          />
+          <KpiCard
+            rotulo="Em risco"
+            valor={formatarMoeda(valorEmRisco)}
+            tom="neutro"
+            nota="soma dos vencidos"
+          />
+          {/* null = a apuração falhou. Mostrar "—" em vez de R$ 0,00: zero
+              seria uma afirmação falsa sobre dinheiro. */}
+          <KpiCard
+            rotulo="Recuperado"
+            valor={recuperado === null ? '—' : formatarMoeda(recuperado)}
+            tom="marca"
+            nota={recuperado === null ? 'indisponível' : `últimos ${JANELA_RECUPERACAO_DIAS} dias`}
+          />
         </div>
       )}
 
@@ -141,57 +126,19 @@ export default async function HomePage() {
           </Link>
         </div>
       ) : (
-        <div className="space-y-6">
-          {gruposVencidos.length > 0 && (
-            <section>
-              <SecaoTitulo
-                rotulo="Vencidos"
-                complemento="cobrar hoje"
-                quantidade={gruposVencidos.length}
-              />
-              <div className="space-y-2">
-                {gruposVencidos.map((grupo) => (
-                  <ClienteCard key={grupo.cliente.id} grupo={grupo} />
-                ))}
-              </div>
-            </section>
-          )}
-          {gruposPreventivos.length > 0 && (
-            <section>
-              <SecaoTitulo
-                rotulo="A vencer"
-                complemento="enviar lembrete"
-                quantidade={gruposPreventivos.length}
-              />
-              <div className="space-y-2">
-                {gruposPreventivos.map((grupo) => (
-                  <ClienteCard key={grupo.cliente.id} grupo={grupo} />
-                ))}
-              </div>
-            </section>
-          )}
+        <div className="space-y-5">
+          <FilaCobranca
+            titulo="Vencidos"
+            complemento="cobrar hoje"
+            grupos={gruposVencidos}
+          />
+          <FilaCobranca
+            titulo="A vencer"
+            complemento="enviar lembrete"
+            grupos={gruposPreventivos}
+          />
         </div>
       )}
     </main>
-  );
-}
-
-/** Cabeçalho de seção da fila. Hierarquia por peso e espaço, sem caixa alta
- *  nem emoji — a cor de urgência já está na faixa de cada card. */
-function SecaoTitulo({
-  rotulo,
-  complemento,
-  quantidade,
-}: {
-  rotulo: string;
-  complemento: string;
-  quantidade: number;
-}) {
-  return (
-    <div className="flex items-baseline gap-2 mb-2.5">
-      <h2 className="text-corpo font-semibold text-texto">{rotulo}</h2>
-      <span className="text-corpo text-texto-fraco numero">{quantidade}</span>
-      <span className="text-corpo text-texto-fraco">· {complemento}</span>
-    </div>
   );
 }

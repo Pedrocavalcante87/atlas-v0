@@ -45,7 +45,7 @@ um repositório; ela impede que cada ponto de chamada invente o próprio tratame
 | **Ingestão de CSV** | `src/app/api/upload-csv/route.ts`, `src/app/api/upload-csv/confirmar/route.ts`, `src/lib/csv-import.ts`, `src/app/upload/page.tsx` | Parse, normalização, validação (prévia e confirmação), dedup e gravação de títulos importados |
 | **Domínio de priorização** | `src/lib/prioridade.ts`, `src/lib/templates.ts`, `src/types/index.ts` | Cálculo de urgência/score, agrupamento por cliente, geração de mensagens |
 | **Formatação de exibição** | `src/lib/format.ts` | `formatarMoeda`, reaproveitado por todas as telas |
-| **Lista do dia (apresentação)** | `src/app/page.tsx`, `src/components/ClienteCard.tsx`, `src/components/TituloCard.tsx` | Renderiza a fila priorizada agrupada por cliente e captura ações do usuário |
+| **Lista do dia (apresentação)** | `src/app/page.tsx`, `src/components/FilaCobranca.tsx`, `src/components/ClienteLinha.tsx` | Renderiza a fila priorizada como TABELA, uma linha por cliente, e captura as ações. A linha expande para mostrar a mensagem consolidada e os títulos individuais |
 | **Histórico do cliente** | `src/app/clientes/[id]/page.tsx` | Leitura de títulos + interações de um cliente |
 | **Mutação de estado** | `src/actions/index.ts` | Server Actions: registrar envio, atualizar status de título |
 | **Administração** | `src/app/dados/page.tsx`, `src/app/api/dados/route.ts` | Estatísticas agregadas + limpeza destrutiva de dados (protegida por frase de confirmação) |
@@ -85,8 +85,7 @@ via E2E ad-hoc.
 ```
 app/page.tsx ──▶ lib/prioridade.ts ──▶ lib/templates.ts ──▶ types/index.ts
      │                │                                          ▲
-     │                └──▶ ClienteCard.tsx ──▶ actions/index.ts ──┘
-     │                          └──▶ TituloCard.tsx ──▶ actions/index.ts
+     │                └──▶ FilaCobranca.tsx ──▶ ClienteLinha.tsx ──▶ actions/index.ts
      └──▶ lib/supabase-io.ts ──▶ lib/supabase.ts
 
 upload/page.tsx ──▶ api/upload-csv (fetch) ──▶ lib/csv-import.ts + lib/prioridade.ts
@@ -120,7 +119,8 @@ Pontos a notar:
 - **`lib/prioridade.ts` agora é usado pela Lista do Dia E por `/api/dados`** (para "valor
   vencido"). O histórico do cliente (`clientes/[id]/page.tsx`) continua sem usá-lo — por design,
   não por descuido: lá a ordenação é cronológica (mais recente primeiro), não por urgência.
-- **`ClienteCard.tsx` agora é renderizado por `app/page.tsx`** — antes existia no código
+- **`ClienteCard.tsx` foi substituído por `ClienteLinha.tsx` em 2026-09-19** (a fila virou tabela);
+  o registro abaixo é histórico. Antes disso ele existia no código
   (bem construído, com sua própria lógica de agrupamento e mensagem consolidada) mas não era
   importado por nenhuma página; a lista do dia renderizava títulos individuais direto. Era o maior
   gap entre o que o README descreve como comportamento do produto e o que de fato rodava.
@@ -141,7 +141,7 @@ Supabase: titulos JOIN clientes (status != pago)   ← o domínio é quem filtra
                               calcula score, categoria, dias, mensagem, motivoReentrada]
    → agruparPorCliente()     [lib/prioridade.ts — agrupa por cliente_id, mensagem consolidada]
    → HomePage (Server Component)
-   → ClienteCard / TituloCard (Client Components)
+   → FilaCobranca (tabela) → ClienteLinha (Client Component)
    → usuário clica "Enviar WhatsApp" ou marca status
    → Server Action (actions/index.ts)
    → grava em `interacoes` (sempre) e `titulos.status` (ao marcar resultado)
@@ -278,7 +278,7 @@ era possível ver "0 títulos" por falha de leitura e clicar em "Limpar tudo" lo
 |---|---|---|
 | Categorização por urgência (>7d atraso / 1-7d / vence em ≤3d) | `lib/prioridade.ts::categorizarTitulo` | Fonte oficial do domínio — reaproveitada em `api/upload-csv/route.ts` e `api/dados/route.ts` |
 | Score de priorização (`dias × valor`) | `lib/prioridade.ts::priorizarTitulos` | Único lugar que calcula score |
-| Agrupamento por cliente + mensagem consolidada | `lib/prioridade.ts::agruparPorCliente`, `lib/templates.ts::gerarMensagemConsolidada` | Centralizado **e renderizado** (`ClienteCard.tsx`, usado por `app/page.tsx`) |
+| Agrupamento por cliente + mensagem consolidada | `lib/prioridade.ts::agruparPorCliente`, `lib/templates.ts::gerarMensagemConsolidada` | Centralizado **e renderizado** (`ClienteLinha.tsx`, na expansão da linha) |
 | Templates de mensagem | `lib/templates.ts` | Centralizado |
 | Reconhecimento de colunas do CSV (aliases) | `lib/csv-import.ts::COLUMN_ALIASES` | Compartilhado por prévia e confirmação |
 | Normalização de valor/data/telefone do CSV | `lib/csv-import.ts` | Módulo de domínio sem I/O, testado (`csv-import.test.ts`). Recusa o **impossível** (mês 25, dia 32) e resolve o **inequívoco** (`1.234.567` = milhar; `55` inicial só é DDI se o número tiver 12–13 dígitos). Não decide o **ambíguo**: `"1.500"` segue lido como decimal — ver PLANEJAMENTO.md §5.3 |
@@ -289,7 +289,7 @@ era possível ver "0 títulos" por falha de leitura e clicar em "Limpar tudo" lo
 | Autenticação | `proxy.ts` + `api/login/route.ts` | Rate limiting em memória + comparação constant-time |
 
 A regra de negócio mais importante do sistema (o que é "urgente") tem uma única implementação,
-reaproveitada em todos os pontos que precisam dela — inclusive `TituloCard.tsx`, que usa
+reaproveitada em todos os pontos que precisam dela — inclusive `ClienteLinha.tsx`, que usa
 `titulo.categoria` em vez de re-derivar os cortes (durante um período ele reimplementava `> 7` /
 `>= 1 && <= 7` por conta própria, apesar deste documento afirmar o contrário).
 
@@ -326,7 +326,7 @@ deles.
   `calcularDiasAtraso` em vez de reimplementar o corte cada um à sua maneira.
 - Reconhecimento de coluna e normalização de CSV — movidos de `api/upload-csv/route.ts` para
   `lib/csv-import.ts`, reaproveitado por `confirmar/route.ts` para revalidar (ver §9).
-- `ClienteCard` recalculava a faixa de urgência a partir de `diasAtrasoMax` em vez de usar
+- `ClienteCard` (hoje `ClienteLinha`) recalculava a faixa de urgência a partir de `diasAtrasoMax` em vez de usar
   `categoriaMaisUrgente` (já calculado por `agruparPorCliente`) — agora reaproveita o campo.
 
 **Ainda existem, por razão explícita:**
@@ -518,9 +518,10 @@ autenticação por credencial única da empresa (e-mail + senha) sem usuários i
 
 - ~~`api/upload-csv/confirmar/route.ts` não tem validação de negócio própria~~ — **resolvido**,
   ver §9.
-- ~~`categoriaMaisUrgente` não é lido em nenhum ponto da UI~~ — **resolvido**: `ClienteCard` agora
+- ~~`categoriaMaisUrgente` não é lido em nenhum ponto da UI~~ — **resolvido**: a linha do cliente
   usa `categoriaMaisUrgente` em vez de recalcular a partir de `diasAtrasoMax`.
-- **`ClienteCard.tsx` existia desde o commit inicial mas nunca era renderizado por nenhuma
+- **[histórico — `ClienteCard.tsx` não existe mais, virou `ClienteLinha.tsx` em 2026-09-19]**
+  O componente existia desde o commit inicial mas nunca era renderizado por nenhuma
   página** — a lista do dia (`app/page.tsx`) sempre mostrou títulos individuais
   (`TituloCard`) direto, nunca agrupados por cliente, apesar do README descrever o agrupamento como
   o comportamento central do produto ("cobrar a PESSOA, não cada título"). **Resolvido**:
@@ -538,12 +539,13 @@ autenticação por credencial única da empresa (e-mail + senha) sem usuários i
   simplesmente sai do número. Não é bug (a ação é declaradamente irreversível e a UI avisa), mas
   passou a ter um custo que antes não existia. Se a apuração virar algo que a empresa acompanha
   ao longo do tempo, essa ação precisa ser repensada — decisão de produto, não tomada aqui.
-- ~~`ClienteCard` engolia a falha ao registrar o envio~~ — **resolvido**: `handleEnviar` não
+- ~~O componente de lista engolia a falha ao registrar o envio~~ — **resolvido** (o tratamento
+  migrou intacto para `ClienteLinha.tsx`): `handleEnviar` não
   tratava a rejeição de `registrarEnvio`, então o botão travava em "Registrando envio..." e o
   usuário seguia para o WhatsApp achando que a cobrança fora registrada — exatamente a perda
   silenciosa de histórico que `actions/index.ts` passou a evitar falhando alto. Agora usa
   `Promise.allSettled` (para saber **quantos** dos títulos do cliente falharam, não só que houve
-  falha) e mostra o aviso no mesmo padrão do `TituloCard`.
+  falha) e mostra o aviso na própria linha.
 - **Os templates de mensagem não sabem que houve promessa quebrada.** Um título que reentra usa o
   template da categoria de urgência dele. Para o caso comum (título vencido) o texto serve; para
   uma promessa sobre título ainda a vencer, a mensagem fala de vencimento e ignora o combinado.
@@ -574,13 +576,13 @@ autenticação por credencial única da empresa (e-mail + senha) sem usuários i
   e o único estado terminal é `pago` (ver §5). Antes de escrever qualquer filtro por status,
   pergunte se ele significa "ainda devido" (`!= 'pago'`) ou "encerrado" (`== 'pago'`) — usar
   `'aberto'` como sinônimo de "ativo" já causou perda de dado neste projeto.
-- Se a mudança é sobre **exibir a lista do dia**, ela é composta por clientes (`ClienteCard`), não
+- Se a mudança é sobre **exibir a lista do dia**, ela é composta por clientes (`ClienteLinha`), não
   títulos soltos — um `TituloComPrioridade` sempre chega à tela dentro de um `ClienteAgrupado`.
-  `TituloCard` é sempre renderizado dentro de `ClienteCard` e por isso não tem botão de WhatsApp
-  nem caixa de mensagem próprios: o card do cliente já tem os dele, consolidados.
+  Os títulos individuais aparecem só na EXPANSÃO da linha, e não têm ação de WhatsApp própria: a
+  linha do cliente já tem a dela, consolidada. O que é por título é o registro de resultado.
 - Novas telas de leitura: o precedente majoritário é Server Component com query direta
   (`/dados` é a exceção histórica, não o padrão a seguir).
 - **Antes de assumir que algo documentado aqui está de fato acontecendo em produção, confira se o
   componente/módulo é realmente importado por uma página** — este projeto já teve um caso real
-  (`ClienteCard.tsx`) de uma funcionalidade inteira, bem construída e documentada no README, que
+  (o antigo `ClienteCard.tsx`) de uma funcionalidade inteira, bem construída e documentada no README, que
   nunca rodava porque nada a importava. `grep` pelo nome do componente/função antes de confiar.

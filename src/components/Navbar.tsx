@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Marca from './Marca';
+import { IconeImportar } from './ui/Icone';
 
 // Barra clara com borda, não a faixa escura de antes: numa ferramenta operada
 // o dia inteiro, o cabeçalho deve desaparecer e deixar a fila ser a única
@@ -23,7 +24,7 @@ export default function Navbar() {
 
   return (
     <header className="bg-superficie border-b border-borda sticky top-0 z-50">
-      <div className="max-w-5xl mx-auto px-5 h-14 flex items-center">
+      <div className="max-w-6xl mx-auto px-5 h-14 flex items-center">
         <Link
           href="/"
           className="text-marca-700 hover:text-marca-800 transition-colors shrink-0"
@@ -71,19 +72,7 @@ export default function Navbar() {
                      hover:bg-superficie-sutil hover:border-tinta-400
                      active:bg-superficie-afundada transition-colors shrink-0"
         >
-          <svg
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.75}
-            strokeLinecap="round"
-            className="w-3.5 h-3.5 text-texto-suave"
-            aria-hidden="true"
-          >
-            <path d="M8 3.5 v7" />
-            <path d="M4.5 7 L8 3.5 L11.5 7" />
-            <path d="M3 12.5 h10" />
-          </svg>
+          <IconeImportar className="w-3.5 h-3.5 text-texto-suave" />
           Importar planilha
         </Link>
       </div>

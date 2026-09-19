@@ -66,7 +66,7 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
     const mensagem =
       e instanceof SupabaseIndisponivelError ? e.message : 'Erro inesperado ao carregar o histórico.';
     return (
-      <main className="max-w-3xl mx-auto px-4 py-8">
+      <main className="max-w-6xl mx-auto px-4 py-8">
         <div className="bg-risco-50 border border-risco-200 rounded-md p-4 text-base text-risco-700">
           {mensagem}
         </div>
@@ -93,7 +93,7 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
     .reduce((sum: number, t: { valor: number }) => sum + t.valor, 0);
 
   return (
-    <main className="max-w-3xl mx-auto px-4 py-6">
+    <main className="max-w-6xl mx-auto px-4 py-6">
       {/* Back */}
       <div className="mb-5">
         <Link href="/" className="text-texto-fraco hover:text-texto-suave text-base transition-colors">

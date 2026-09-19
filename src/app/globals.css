@@ -36,19 +36,22 @@
   --color-marca-950: #0d1f1a;
 
   /* --- Neutros -----------------------------------------------------------
-     Cinzas quase puros, com um toque mínimo de verde para não brigar com a
-     marca. Slate (azulado) deixaria o verde sujo. */
-  --color-tinta-50:  #f7f8f7;
-  --color-tinta-100: #eef0ef;
-  --color-tinta-200: #dfe2e0;
-  --color-tinta-300: #c3c8c5;
-  --color-tinta-400: #9aa19d;
-  --color-tinta-500: #767d79;
-  --color-tinta-600: #5d635f;
-  --color-tinta-700: #4a4f4c;
-  --color-tinta-800: #333735;
-  --color-tinta-900: #1f2221;
-  --color-tinta-950: #121413;
+     Cinzas frios que terminam em AZUL-ESCURO, não em preto. É o que dá o tom
+     corporativo: texto em #16203a lê como tinta de documento financeiro, e
+     preto puro numa tela branca cansa em jornada longa.
+     O verde da marca é dessaturado o bastante para conviver com o frio sem
+     sujar — o que não funcionaria com um verde vivo. */
+  --color-tinta-50:  #f8f9fb;
+  --color-tinta-100: #eff1f5;
+  --color-tinta-200: #dfe3ea;
+  --color-tinta-300: #c5cdd9;
+  --color-tinta-400: #98a3b5;
+  --color-tinta-500: #6f7b90;
+  --color-tinta-600: #556174;
+  --color-tinta-700: #3f4a5d;
+  --color-tinta-800: #2a3345;
+  --color-tinta-900: #16203a;
+  --color-tinta-950: #0c1322;
 
   /* --- Semânticos de domínio --------------------------------------------
      Esta é a gramática que o usuário lê ANTES do texto. Não trocar por
@@ -76,13 +79,17 @@
      Nomeados pelo papel, não pela cor. Um tema escuro futuro redefine só
      estes seis valores. */
   --color-superficie:         #ffffff;
-  --color-superficie-sutil:   #f7f8f7;
-  --color-superficie-afundada: #eef0ef;
-  --color-borda:              #dfe2e0;
-  --color-borda-forte:        #c3c8c5;
-  --color-texto:              #1f2221;
-  --color-texto-suave:        #5d635f;
-  --color-texto-fraco:        #9aa19d;
+  --color-superficie-sutil:   #f8f9fb;
+  --color-superficie-afundada: #eff1f5;
+  --color-borda:              #e4e8ee;
+  --color-borda-forte:        #c5cdd9;
+  --color-texto:              #16203a;
+  --color-texto-suave:        #556174;
+  --color-texto-fraco:        #98a3b5;
+  /* Fundo de cabeçalho de tabela e de linha sob o cursor. Separados dos
+     demais porque mudam juntos e com frequência ao calibrar densidade. */
+  --color-cabecalho:          #f8f9fb;
+  --color-linha-hover:        #f4f6fa;
 
   /* --- Raios -------------------------------------------------------------
      Curtos. Cartão de 16px arredondado lê como app de consumo; este produto

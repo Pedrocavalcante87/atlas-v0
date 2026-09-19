@@ -82,9 +82,11 @@ O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura 
 
 > Títulos que vencem em mais de 3 dias **não aparecem** — o sistema só mostra o que é urgente.
 
-**Os cards são agrupados por cliente, não por título.** Se um cliente tem 3 títulos em aberto, ele aparece uma única vez na lista — cobrar a pessoa, não cada título isolado, evita mandar várias mensagens separadas pra mesma pessoa no mesmo dia.
+**A fila é uma tabela, com uma linha por cliente — não por título.** Se um cliente tem 3 títulos em aberto, ele aparece uma única vez na lista — cobrar a pessoa, não cada título isolado, evita mandar várias mensagens separadas pra mesma pessoa no mesmo dia.
 
-**Dentro de cada card de cliente:**
+**Cada linha mostra:** nome do cliente (clicável → histórico), telefone, valor total em aberto, maior atraso e quantidade de títulos. À direita ficam três ações padronizadas em ícone: **enviar pelo WhatsApp** (abre a conversa com a mensagem pronta e registra o envio), **ligar** (abre o discador) e **marcar como pago**.
+
+**Ao expandir a linha** (seta à esquerda) aparecem:
 
 - Nome do cliente (clicável → abre o histórico) e telefone
 - Valor total em aberto e quantidade de títulos

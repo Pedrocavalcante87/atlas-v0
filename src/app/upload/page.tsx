@@ -141,7 +141,7 @@ export default function UploadPage() {
   }
 
   return (
-    <main className="max-w-3xl mx-auto px-4 py-6">
+    <main className="max-w-6xl mx-auto px-4 py-6">
       <div className="mb-6">
         <div className="mb-1">
           <Link href="/" className="text-texto-fraco hover:text-texto-suave text-base transition-colors">

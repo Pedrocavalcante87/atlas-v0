@@ -242,7 +242,9 @@ admitir a lacuna.
 src/
 ├── app/             # rotas (App Router) + API routes em app/api/*/route.ts
 ├── components/       # componentes de UI ('use client' onde há interação)
-│   ├── ui/             # primitivas do sistema visual (Botao, Badge)
+│   ├── ui/             # primitivas (Botao, BotaoIcone, Badge, Icone, KpiCard)
+│   ├── FilaCobranca.tsx  # a fila do dia como tabela
+│   ├── ClienteLinha.tsx  # uma linha = um cliente; expande para os títulos
 │   └── Marca.tsx       # símbolo + wordmark
 ├── lib/
 │   ├── prioridade.ts   # domínio puro: urgência, score, fila do dia, agrupamento
@@ -338,7 +340,7 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
 - **Categorização de urgência**: `> 7 dias` de atraso = `atraso_longo`; `1–7 dias` =
   `atraso_leve`; vence hoje até `+3 dias` = `preventivo`; vencimento `> 3 dias` no futuro **não
   aparece** na lista do dia. Fonte oficial e única: `lib/prioridade.ts::categorizarTitulo`,
-  reaproveitada por `api/upload-csv/route.ts`, `api/dados/route.ts` e `TituloCard.tsx` (que usa
+  reaproveitada por `api/upload-csv/route.ts`, `api/dados/route.ts` e `ClienteLinha.tsx` (que usa
   `titulo.categoria`, não recalcula). Coberto por teste.
 - **Exceção deliberada ao corte de urgência**: um título que reentra por promessa vencida ou fim
   do silêncio entra na fila **mesmo com vencimento distante** — o compromisso com o cliente vence
@@ -347,7 +349,7 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
   preventivos ordenam por vencimento mais próximo.
 - **Cobrança é por cliente, não por título**: um cliente com vários títulos em aberto recebe uma
   mensagem e um envio de WhatsApp consolidados (`lib/prioridade.ts::agruparPorCliente`,
-  `ClienteCard.tsx`). Cada título individual mantém seu próprio controle de status.
+  `ClienteLinha.tsx`). Cada título individual mantém seu próprio controle de status, na expansão da linha.
 - **`telefone` é a chave de upsert de cliente** (`onConflict: 'telefone'` em
   `upload-csv/confirmar/route.ts`). Dois clientes reais com o mesmo número se fundem
   silenciosamente sob o mesmo registro — comportamento atual, não validado contra esse caso.
@@ -596,7 +598,7 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   antes só saíam se o mesmo IP voltasse, então o mapa crescia sem teto.
 - **Falha de Server Action precisa ser tratada por quem chama.** `registrarEnvio` e
   `atualizarStatusTitulo` lançam de propósito (o histórico é a única prova de que a cobrança
-  aconteceu). `ClienteCard` não capturava, e o resultado era o pior dos dois mundos: o WhatsApp
+  aconteceu). O componente de lista não capturava, e o resultado era o pior dos dois mundos: o WhatsApp
   abria, o botão travava em "Registrando envio..." e o registro não existia. Ao chamar uma Server
   Action de um componente, trate a rejeição e mostre o que falhou — em lote, com
   `Promise.allSettled`, para saber **quantos** falharam.
