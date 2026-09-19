@@ -86,7 +86,7 @@ Tudo nesta seção foi lido no código durante a Etapa 1.
 
 **Forma**: monólito Next.js 16 (App Router), React 19, Tailwind v4, TypeScript strict. Sem backend
 separado, fila, worker ou cache. Supabase (Postgres) acessado por `service_role` só no servidor;
-RLS habilitado sem políticas. Autenticação por senha única em variável de ambiente + cookie
+RLS habilitado sem políticas. Autenticação por credencial única (e-mail + senha) em variáveis de ambiente + cookie
 httpOnly.
 
 **Modelo de dados**: três tabelas — `clientes` (`telefone` unique), `titulos`, `interacoes`
@@ -113,8 +113,9 @@ nem coluna.
 **Gravação sob conflito**: `src/lib/importacao.ts` — máquina de estados com I/O injetado
 (`Portas`), traduz SQLSTATE 23505 como duplicata e concilia contra o banco antes de reportar perda.
 
-**Testes**: ~143 casos, todos em `src/lib/`. Rotas, Server Actions e componentes não têm cobertura;
-a verificação deles é manual.
+**Testes**: 202 casos, todos em `src/lib/` (eram ~143 quando esta seção foi escrita, em
+2026-08-12). Rotas, Server Actions e componentes seguem sem cobertura; a verificação deles é
+manual.
 
 ---
 
@@ -260,7 +261,9 @@ Multi-moeda não é uma coluna — é revisão de todo parse e toda exibição.
 
 ### 5.7 Mono-empresa por construção — [FATO]
 
-Uma senha compartilhada, sem usuários individuais, sem `empresa_id`, sem trilha de auditoria, RLS
+Uma credencial compartilhada — desde 2026-09-19 com **e-mail + senha**, o que **não muda nada
+deste parágrafo**: continua sendo uma credencial da empresa, não contas. Sem usuários
+individuais, sem `empresa_id`, sem trilha de auditoria, RLS
 sem políticas + `service_role`. Multi-tenancy é reescrita do modelo de segurança, não incremento.
 
 ### 5.8 Custos que crescem com a ambição
@@ -597,6 +600,8 @@ valendo para tudo o mais:
 | 2026-09-18 | Cookie de sessão assinado (`src/lib/sessao.ts`, `proxy.ts`, `api/login`) | O cookie era o literal `'1'` e autenticava qualquer requisição. Defeito de segurança presente, sem relação com a Fase 1       |
 | 2026-09-19 | Parsing determinístico (`src/lib/csv-import.ts`): telefone, data, valor com 2+ pontos | Três defeitos onde **só existe uma leitura possível**. Nenhum decide entre alternativas, então nenhum fecha porta da Fase 1 |
 | 2026-09-19 | Valor ambíguo (`"1.500"`) passa a ser **recusado com motivo**, não adivinhado | Decisão do usuário. Não escolhe convenção — faz o código decidir *menos*. Ver §5.3 |
+| 2026-09-19 | Identidade visual própria (`globals.css`, `components/ui/`, `Marca.tsx`) | Trabalho desbloqueado sem usuários, e a tela faz parte da conversa que vai buscar os arquivos da Fase 0. O fluxo de `/upload` foi só repaginado, não redesenhado — a tela de mapeamento é o centro da Fase 1 |
+| 2026-09-19 | Login com **e-mail + senha** (`APP_EMAIL`) | Credencial de duas partes, não contas de usuário. **Não altera o §5.7**: segue mono-empresa, sem cadastro e sem auditoria |
 
 **A restrição do §5.3 continua de pé onde importa**: nenhuma convenção de milhar/decimal foi
 escolhida por célula. A correção estrutural (decidir por coluna, com confirmação) segue sendo da

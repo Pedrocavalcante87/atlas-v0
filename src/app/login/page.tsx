@@ -6,6 +6,7 @@ import Marca from '@/components/Marca';
 import { Botao } from '@/components/ui/Botao';
 
 export default function LoginPage() {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,20 +20,20 @@ export default function LoginPage() {
     const res = await fetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ email, password }),
     });
 
     if (res.ok) {
       router.push('/');
       router.refresh();
     } else {
-      // 429 é o limitador de tentativas, não senha errada — dizer "senha
-      // incorreta" a quem já acertou mandaria a pessoa tentar de novo em vez
+      // 429 é o limitador de tentativas, não credencial errada — dizer
+      // "incorretos" a quem já acertou mandaria a pessoa tentar de novo em vez
       // de esperar, que é o oposto do que precisa acontecer.
       setError(
         res.status === 429
           ? 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.'
-          : 'Senha incorreta.',
+          : 'E-mail ou senha incorretos.',
       );
       setLoading(false);
     }
@@ -47,21 +48,42 @@ export default function LoginPage() {
           </span>
           <h1 className="text-[15px] font-medium text-texto">Entrar no painel</h1>
           <p className="text-[13px] text-texto-suave mt-0.5">
-            Use a senha de acesso da sua empresa.
+            Use as credenciais de acesso da sua empresa.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label
-              htmlFor="senha"
-              className="block text-[13px] font-medium text-texto mb-1.5"
-            >
+            <label htmlFor="email" className="block text-[13px] font-medium text-texto mb-1.5">
+              E-mail
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              inputMode="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="voce@suaempresa.com.br"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'erro-login' : undefined}
+              className={`w-full h-10 bg-superficie border rounded-md px-3 text-sm text-texto placeholder-texto-fraco transition-colors ${
+                error ? 'border-risco-500' : 'border-borda-forte hover:border-tinta-400'
+              }`}
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label htmlFor="senha" className="block text-[13px] font-medium text-texto mb-1.5">
               Senha
             </label>
             <input
               id="senha"
+              name="senha"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               aria-invalid={error ? true : undefined}
@@ -69,7 +91,6 @@ export default function LoginPage() {
               className={`w-full h-10 bg-superficie border rounded-md px-3 text-sm text-texto placeholder-texto-fraco transition-colors ${
                 error ? 'border-risco-500' : 'border-borda-forte hover:border-tinta-400'
               }`}
-              autoFocus
             />
           </div>
 

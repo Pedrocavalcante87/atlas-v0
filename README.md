@@ -48,9 +48,11 @@ Login → Importar CSV → Ver Lista do Dia → Enviar WhatsApp → Registrar re
 
 ### 1. Login (`/login`)
 
-Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor via variável de ambiente (`APP_PASSWORD`). Após o login, um cookie de sessão **assinado pelo servidor** é salvo por 30 dias — o usuário não precisa digitar a senha novamente nesse período.
+Tela de entrada com **e-mail e senha**, configurados pelo desenvolvedor nas variáveis de ambiente `APP_EMAIL` e `APP_PASSWORD`. Após o login, um cookie de sessão **assinado pelo servidor** é salvo por 30 dias — não é preciso digitar de novo nesse período. O e-mail ignora maiúsculas e espaços; a senha não.
 
-O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura que só o servidor consegue produzir (a chave é derivada de `APP_PASSWORD`). Um cookie inventado, alterado ou com a validade esticada é recusado e cai no login. Trocar `APP_PASSWORD` encerra todas as sessões abertas.
+> **Importante:** isso é **uma credencial da empresa**, não contas de usuário. Não há cadastro, não há uma conta por pessoa, e o sistema não registra *quem* fez cada ação — só que foi feita. Todo mundo do negócio usa o mesmo e-mail e a mesma senha. Contas individuais exigiriam mudança estrutural (ver `PLANEJAMENTO.md` §5.7).
+
+O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura que só o servidor consegue produzir (a chave deriva do e-mail **e** da senha). Um cookie inventado, alterado ou com a validade esticada é recusado e cai no login. Trocar o e-mail ou a senha encerra todas as sessões abertas.
 
 > **Para testadores:** em desenvolvimento local sem senha configurada, o login é ignorado e você entra direto. Em produção sem senha configurada o app responde 503 em vez de liberar o acesso.
 
@@ -345,8 +347,8 @@ uma cobrança nova.
 | Linguagem | TypeScript |
 | Banco de dados | Supabase (PostgreSQL) |
 | Parse de CSV | PapaParse |
-| Autenticação | Cookie HTTP-only assinado (HMAC) + proxy |
-| Testes | Vitest (193 casos, domínio, política de I/O e sessão) |
+| Autenticação | E-mail + senha (credencial única) · cookie HTTP-only assinado (HMAC) + proxy |
+| Testes | Vitest (202 casos, domínio, política de I/O e sessão) |
 
 ---
 
@@ -392,7 +394,7 @@ Copie o arquivo de exemplo e preencha com os dados do seu projeto Supabase:
 cp .env.local.example .env.local
 ```
 
-São três variáveis, todas obrigatórias:
+São quatro variáveis, todas obrigatórias:
 
 ```env
 # Supabase → Settings > API > Project URL
@@ -404,14 +406,17 @@ NEXT_PUBLIC_SUPABASE_URL=
 # definição e só é usada no servidor — nunca é enviada ao navegador.
 SUPABASE_SERVICE_ROLE_KEY=
 
-# Senha de acesso ao painel — defina uma senha real antes de rodar.
+# Credencial de acesso ao painel — e-mail E senha, as duas obrigatórias.
+# Não são contas de usuário: é uma credencial única da empresa, com duas
+# partes. Trocar qualquer uma encerra as sessões abertas.
+APP_EMAIL=
 APP_PASSWORD=
 ```
 
 > A chave anônima (`NEXT_PUBLIC_SUPABASE_ANON_KEY`) **não é mais necessária** — nenhum código a
 > lê desde que o acesso ao banco passou a ser exclusivamente pela `service_role` no servidor.
 
-> **`APP_PASSWORD` em branco:** em desenvolvimento, o app roda sem pedir login (conveniente, e o
+> **`APP_EMAIL` ou `APP_PASSWORD` em branco:** em desenvolvimento, o app roda sem pedir login (conveniente, e o
 > risco é local). Em produção (`NODE_ENV=production`) o app **se recusa a servir** e responde 503
 > até a variável ser definida — deixar dados de clientes acessíveis sem autenticação por descuido
 > de configuração não é um modo de falha aceitável.
@@ -539,7 +544,7 @@ Siga estes passos para validar o funcionamento completo do sistema:
 
 ## Limitações conhecidas do v0
 
-- A autenticação é por senha única (não há usuários individuais nem separação por empresa).
+- A autenticação é por uma credencial única da empresa (e-mail + senha). **Não há usuários individuais**, nem separação por empresa, nem registro de quem fez cada ação.
 - Não há envio automático de mensagens — o WhatsApp é aberto manualmente.
 - Não há notificações ou lembretes agendados: a reentrada de um título acontece quando você abre
   a lista do dia, não por aviso ativo.

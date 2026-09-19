@@ -41,7 +41,7 @@ um repositório; ela impede que cada ponto de chamada invente o próprio tratame
 
 | Módulo | Arquivos | Responsabilidade |
 |---|---|---|
-| **Autenticação** | `src/proxy.ts`, `src/app/api/login/route.ts`, `src/app/login/page.tsx`, `src/lib/sessao.ts` | Gate por senha única (env var) + cookie httpOnly **assinado (HMAC-SHA256)** de 30 dias + rate limiting em memória |
+| **Autenticação** | `src/proxy.ts`, `src/app/api/login/route.ts`, `src/app/login/page.tsx`, `src/lib/sessao.ts`, `src/lib/credenciais.ts` | Gate por credencial única de duas partes (`APP_EMAIL` + `APP_PASSWORD`) + cookie httpOnly **assinado (HMAC-SHA256)** de 30 dias + rate limiting em memória. **Não são contas de usuário** — ver §9 |
 | **Ingestão de CSV** | `src/app/api/upload-csv/route.ts`, `src/app/api/upload-csv/confirmar/route.ts`, `src/lib/csv-import.ts`, `src/app/upload/page.tsx` | Parse, normalização, validação (prévia e confirmação), dedup e gravação de títulos importados |
 | **Domínio de priorização** | `src/lib/prioridade.ts`, `src/lib/templates.ts`, `src/types/index.ts` | Cálculo de urgência/score, agrupamento por cliente, geração de mensagens |
 | **Formatação de exibição** | `src/lib/format.ts` | `formatarMoeda`, reaproveitado por todas as telas |
@@ -51,6 +51,7 @@ um repositório; ela impede que cada ponto de chamada invente o próprio tratame
 | **Administração** | `src/app/dados/page.tsx`, `src/app/api/dados/route.ts` | Estatísticas agregadas + limpeza destrutiva de dados (protegida por frase de confirmação) |
 | **Acesso a dados** | `src/lib/supabase.ts` | Client Supabase único (service_role), lazy-init via Proxy |
 | **Política de I/O** | `src/lib/supabase-io.ts` | Prazo (8s leitura / 15s escrita), classificação infra × banco, paginação por cursor, e leitura que lança em vez de devolver vazio |
+| **Sistema visual** | `src/app/globals.css`, `src/components/ui/`, `src/components/Marca.tsx` | Tokens semânticos em `@theme` (superficie, borda, texto, marca, risco, atencao) e as primitivas que os consomem. Telas usam token, nunca cor literal do Tailwind |
 | **Limite de tentativas** | `src/lib/rate-limit.ts` | Janela, contagem por chave e expurgo das entradas expiradas, com o "agora" injetável. Estado por processo — não sobrevive a restart nem é compartilhado entre instâncias |
 | **Gravação da importação** | `src/lib/importacao.ts` | Máquina de estados que grava um lote convivendo com o índice único: conflito vira duplicata, e a conciliação final diz o que de fato ficou no banco. Recebe as operações de banco como parâmetro (`Portas`), então é testável com dublês |
 | **Layout / navegação** | `src/app/layout.tsx`, `src/components/Navbar.tsx`, `src/components/NavbarWrapper.tsx` | Casca visual, esconde navbar no login |
@@ -72,7 +73,7 @@ está fora", e paginação. Existe porque a alternativa (repetir `if (error)` em
 justamente o que falhou: `?? 0` espalhado por `/api/dados` transformava apagão em R$ 0,00.
 
 **Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`,
-`supabase-io.test.ts`, `importacao.test.ts`, `sessao.test.ts`, `rate-limit.test.ts`.
+`supabase-io.test.ts`, `importacao.test.ts`, `sessao.test.ts`, `rate-limit.test.ts`, `credenciais.test.ts`.
 `lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
 Server Action ou componente React tem cobertura — a verificação deles é manual (`npm run dev`) ou
 via E2E ad-hoc.
@@ -455,11 +456,15 @@ deles.
   reais com o mesmo número (erro de digitação, número corporativo compartilhado) se fundem
   silenciosamente sob o mesmo registro. Resolver isso é uma decisão de produto (permitir telefone
   duplicado? UI de merge de clientes?), não só técnica — não decidido silenciosamente aqui.
-- Autenticação continua sendo uma senha única compartilhada (sem usuários individuais, sem
-  trilha de auditoria de "quem fez o quê"). Aceitável para uma ferramenta de instância única e uso
-  interno; se o Atlas evoluir para atender múltiplos clientes/tenants isolados, isso precisa virar
-  autenticação de verdade com isolamento por tenant — mudança estrutural, não incremental (ver
-  observação de produto no final deste documento).
+- **Autenticação é uma credencial única da empresa, com duas partes** (`APP_EMAIL` +
+  `APP_PASSWORD`, em `lib/credenciais.ts`). O e-mail foi acrescentado em 2026-09-19 e **não cria
+  contas**: não há tabela de usuários, cadastro, recuperação de senha nem trilha de "quem fez o
+  quê" — duas pessoas usando a mesma credencial são indistinguíveis para o sistema. Ele participa
+  do segredo que assina a sessão, então trocar o e-mail ou a senha encerra as sessões abertas, e
+  já deixa o campo no fluxo para o dia em que contas existirem. Se o Atlas evoluir para atender
+  múltiplos clientes/tenants isolados, isso precisa virar autenticação de verdade com hash por
+  usuário e isolamento por tenant — mudança estrutural, não incremental (ver §5.7 do
+  PLANEJAMENTO.md e a observação de produto no final deste documento).
 - RLS está habilitado nas 3 tabelas sem nenhuma política (`supabase/rls.sql`), e todo acesso passa
   pela `service_role` key usada só no servidor (`lib/supabase.ts`, agora corrigido) — esse modelo
   é o correto para uma instância única sem Supabase Auth.
@@ -470,7 +475,7 @@ deles.
 
 - Sem camada de repositório: mudar um nome de coluna ou tabela exige busca manual em todos os
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
-- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **193 casos**, todos
+- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **202 casos**, todos
   em `src/lib/`. Cobrem score e categorização (`prioridade`), parsing e planejamento do lote
   (`csv-import`), apuração (`recuperacao`), classificação de falha e paginação por cursor
   (`supabase-io`), a máquina de estados de conflito (`importacao`) e a assinatura/expiração do
@@ -507,7 +512,7 @@ deles.
 
 **Documentadas como limitação de escopo do v0** (ver README): sem envio automático de mensagens,
 sem agendamento/lembretes, sem exportação de relatórios, sem paginação na lista do dia,
-autenticação de senha única sem usuários individuais.
+autenticação por credencial única da empresa (e-mail + senha) sem usuários individuais.
 
 **Notadas na leitura do código, não documentadas — status atual:**
 
