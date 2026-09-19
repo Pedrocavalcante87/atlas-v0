@@ -24,13 +24,21 @@ export function SimboloAtlas({ className = 'w-5 h-5' }: PropsSimbolo) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2.25}
-      strokeLinecap="square"
+      strokeWidth={2.75}
+      strokeLinejoin="miter"
+      strokeLinecap="butt"
       className={className}
       aria-hidden="true"
     >
-      <path d="M5 20 L12 4 L19 20" />
-      <path d="M3 15 L21 15" />
+      {/* Ápice fechado em ponta (miter), pernas bem abertas: em 20px um "A" de
+          traço fino some, e o vértice arredondado tira a firmeza que a marca
+          precisa ter ao lado de números. */}
+      <path d="M4.5 20.5 L12 3.5 L19.5 20.5" />
+      {/* A travessa ultrapassa por pouco — 1,5px de cada lado. Na versão
+          anterior ela avançava até a borda do quadro e o símbolo lia como um
+          "A" cortado (Ⱥ), não como base sustentando peso. Sentada em 14.5,
+          perto de onde a travessa de um "A" real fica. */}
+      <path d="M6.6 14.5 L17.4 14.5" />
     </svg>
   );
 }
@@ -44,11 +52,16 @@ interface PropsMarca {
 export default function Marca({ apenasSimbolo = false, className = '' }: PropsMarca) {
   return (
     <span className={`inline-flex items-center gap-2 ${className}`}>
-      <SimboloAtlas className="w-[18px] h-[18px] shrink-0" />
+      <SimboloAtlas className="w-5 h-5 shrink-0" />
       {!apenasSimbolo && (
-        // Tracking apertado e peso semibold: o wordmark precisa ler como marca,
-        // não como um título qualquer da interface.
-        <span className="font-semibold text-destaque tracking-[-0.02em] leading-none">Atlas</span>
+        // Peso 600 e tracking fechado: o wordmark precisa ler como marca, não
+        // como um título qualquer da interface. O símbolo em 20px e o texto em
+        // 15px dão ao conjunto altura suficiente para ancorar a barra — em
+        // 18px/15px a marca competia de igual para igual com os links de
+        // navegação e nada liderava.
+        <span className="font-semibold text-destaque tracking-[-0.025em] leading-none">
+          Atlas
+        </span>
       )}
     </span>
   );
