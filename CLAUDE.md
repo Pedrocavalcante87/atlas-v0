@@ -308,9 +308,18 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
 - **Forma: raios curtos (2–8px), separação por borda de 1px, sem sombra.** Há uma sombra só
   (`shadow-flutuante`), reservada ao que flutua de verdade. Cartão de 16px arredondado com sombra
   lê como app de consumo; este produto mostra dinheiro devido.
-- **Todo número de dinheiro leva a classe `.numero`** (tabular-nums). Sem ela a coluna de valores
-  muda de largura a cada render e fica impossível comparar de relance — que é a tarefa do usuário
-  na lista do dia.
+- **Tamanho de texto vem da escala, nunca de `text-[Npx]`.** Os degraus são nomeados por papel —
+  `text-micro`, `text-legenda`, `text-corpo`, `text-base`, `text-destaque`, `text-titulo`,
+  `text-cifra` — e cada um já traz altura de linha e espacejamento. Escrever `text-[13px]` de novo
+  desfaz o sistema em silêncio: funciona na tela e some da escala. (A primeira versão do sistema
+  fez exatamente isso; foi corrigido.) `text-xs`/`text-sm`/`text-lg`/`text-xl` do Tailwind também
+  saíram do código.
+- **Duas famílias, com papéis fixos:** Inter para texto e ações; **IBM Plex Mono para dinheiro e
+  identificadores** (telefone, documento), via classe `.numero`. Não use a mono como enfeite em
+  texto corrido — o contraste só significa alguma coisa enquanto ela marcar "isto é um número".
+- **Todo número de dinheiro leva a classe `.numero`** — ela aplica a mono e `tabular-nums`. Sem
+  largura de dígito fixa a coluna de valores muda de largura a cada render e fica impossível
+  comparar de relance, que é a tarefa do usuário na lista do dia.
 - **Botão e etiqueta vêm de `components/ui/`**, com variante por PAPEL (`primario`, `secundario`,
   `sutil`, `perigo`), não por cor. Só um `primario` por bloco.
 - **`'use client'` só onde há estado/interação** (formulários, botões com handler). Páginas que só

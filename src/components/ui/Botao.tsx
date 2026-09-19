@@ -14,29 +14,44 @@ export type VarianteBotao = 'primario' | 'secundario' | 'sutil' | 'perigo';
 export type TamanhoBotao = 'sm' | 'md' | 'lg';
 
 const VARIANTES: Record<VarianteBotao, string> = {
+  // A borda interna clara (inset) dá ao botão sólido um relevo de 1px sem
+  // sombra nenhuma — é o truque que mantém o botão com presença física num
+  // sistema que baniu elevação. O escurecimento no active substitui o
+  // deslocamento de 1px, que em tela densa lê como tremor.
   primario:
-    'bg-marca-700 text-white border border-marca-700 hover:bg-marca-800 hover:border-marca-800 active:bg-marca-900',
+    'bg-marca-700 text-white border border-marca-800 ' +
+    'shadow-[inset_0_1px_0_0_rgb(255_255_255/0.12)] ' +
+    'hover:bg-marca-800 active:bg-marca-900 active:shadow-none',
   secundario:
-    'bg-superficie text-texto border border-borda-forte hover:bg-superficie-sutil active:bg-superficie-afundada',
+    'bg-superficie text-texto border border-borda-forte ' +
+    'hover:bg-superficie-sutil hover:border-tinta-400 active:bg-superficie-afundada',
   sutil:
-    'bg-transparent text-texto-suave border border-transparent hover:bg-superficie-afundada hover:text-texto',
+    'bg-transparent text-texto-suave border border-transparent ' +
+    'hover:bg-superficie-afundada hover:text-texto active:bg-borda',
   // Contorno, não preenchido: uma ação destrutiva não deve competir em peso
   // visual com a ação principal da tela — ela precisa ser encontrável, não
   // convidativa. Vira sólida só no hover, quando a intenção já está clara.
   perigo:
-    'bg-superficie text-risco-600 border border-risco-200 hover:bg-risco-600 hover:text-white hover:border-risco-600',
+    'bg-superficie text-risco-600 border border-risco-200 ' +
+    'hover:bg-risco-600 hover:text-white hover:border-risco-600 active:bg-risco-700',
 };
 
+// Altura e respiro horizontal crescem juntos; o texto não cresce junto de
+// propósito. Botão grande com letra grande vira banner — o que muda entre os
+// tamanhos é a área de clique e o peso na composição, não o volume do texto.
 const TAMANHOS: Record<TamanhoBotao, string> = {
-  sm: 'h-8 px-3 text-[13px] gap-1.5',
-  md: 'h-9 px-4 text-sm gap-2',
-  lg: 'h-11 px-5 text-sm gap-2',
+  sm: 'h-7 px-2.5 text-corpo gap-1.5',
+  md: 'h-9 px-3.5 text-corpo gap-2',
+  lg: 'h-10 px-4 text-base gap-2',
 };
 
 const BASE =
   'inline-flex items-center justify-center rounded-md font-medium leading-none ' +
-  'transition-colors duration-150 select-none ' +
-  'disabled:opacity-45 disabled:pointer-events-none';
+  // Tracking levemente fechado: em peso 500 e caixa baixa, o rótulo curto de
+  // um botão abre demais e perde a leitura como bloco único.
+  'tracking-[-0.006em] whitespace-nowrap ' +
+  'transition-colors duration-100 select-none cursor-pointer ' +
+  'disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed';
 
 function classes(variante: VarianteBotao, tamanho: TamanhoBotao, largura?: boolean, extra?: string) {
   return [BASE, VARIANTES[variante], TAMANHOS[tamanho], largura ? 'w-full' : '', extra ?? '']

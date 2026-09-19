@@ -22,7 +22,7 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string; dot: string }>
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.aberto;
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${cfg.cls}`}>
+    <span className={`inline-flex items-center gap-1.5 text-legenda px-2.5 py-1 rounded-full font-medium ${cfg.cls}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {cfg.label}
     </span>
@@ -67,7 +67,7 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
       e instanceof SupabaseIndisponivelError ? e.message : 'Erro inesperado ao carregar o histórico.';
     return (
       <main className="max-w-3xl mx-auto px-4 py-8">
-        <div className="bg-risco-50 border border-risco-200 rounded-md p-4 text-sm text-risco-700">
+        <div className="bg-risco-50 border border-risco-200 rounded-md p-4 text-base text-risco-700">
           {mensagem}
         </div>
       </main>
@@ -96,7 +96,7 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
     <main className="max-w-3xl mx-auto px-4 py-6">
       {/* Back */}
       <div className="mb-5">
-        <Link href="/" className="text-texto-fraco hover:text-texto-suave text-sm transition-colors">
+        <Link href="/" className="text-texto-fraco hover:text-texto-suave text-base transition-colors">
           ← Lista do dia
         </Link>
       </div>
@@ -106,22 +106,22 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
         <div className="flex items-start justify-between">
           <div>
             <div className="w-10 h-10 bg-superficie-afundada rounded-md flex items-center justify-center mb-3">
-              <span className="text-texto-suave font-bold text-lg">{cliente.nome.charAt(0).toUpperCase()}</span>
+              <span className="text-texto-suave font-bold text-titulo">{cliente.nome.charAt(0).toUpperCase()}</span>
             </div>
-            <h2 className="text-xl font-bold text-texto">{cliente.nome}</h2>
-            <p className="text-sm text-texto-fraco mt-0.5 font-mono">{cliente.telefone}</p>
+            <h2 className="text-cifra font-bold text-texto">{cliente.nome}</h2>
+            <p className="text-base text-texto-fraco mt-0.5 font-mono">{cliente.telefone}</p>
           </div>
           <div className="text-right">
             {totalAberto > 0 && (
               <div className="bg-risco-50 border border-risco-100 rounded-md px-3 py-2">
-                <p className="text-xs text-risco-500 font-medium">Em aberto</p>
-                <p className="text-lg font-bold text-risco-600">{formatarMoeda(totalAberto)}</p>
+                <p className="text-legenda text-risco-500 font-medium">Em aberto</p>
+                <p className="text-titulo font-bold text-risco-600">{formatarMoeda(totalAberto)}</p>
               </div>
             )}
             {totalPago > 0 && (
               <div className="bg-marca-50 border border-marca-100 rounded-md px-3 py-2 mt-2">
-                <p className="text-xs text-marca-600 font-medium">Pago</p>
-                <p className="text-sm font-bold text-marca-700">{formatarMoeda(totalPago)}</p>
+                <p className="text-legenda text-marca-600 font-medium">Pago</p>
+                <p className="text-base font-bold text-marca-700">{formatarMoeda(totalPago)}</p>
               </div>
             )}
           </div>
@@ -129,7 +129,7 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
       </div>
 
       {/* Título da seção */}
-      <p className="text-xs font-semibold text-texto-suave uppercase tracking-widest mb-3 px-1">
+      <p className="text-legenda font-semibold text-texto-suave uppercase tracking-widest mb-3 px-1">
         Histórico de títulos
       </p>
 
@@ -151,14 +151,14 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
               <div key={titulo.id} className="bg-superficie border border-borda rounded-md overflow-hidden">
                 <div className="flex justify-between items-start p-4">
                   <div>
-                    <p className="text-xl font-bold text-texto">
+                    <p className="text-cifra font-bold text-texto">
                       {formatarMoeda(titulo.valor)}
                     </p>
-                    <p className="text-xs text-texto-fraco mt-0.5">
+                    <p className="text-legenda text-texto-fraco mt-0.5">
                       Vencimento: {formatarData(titulo.data_vencimento)}
                     </p>
                     {titulo.data_promessa && (
-                      <p className="text-xs text-marca-700 mt-1 font-medium">
+                      <p className="text-legenda text-marca-700 mt-1 font-medium">
                         📅 Promessa para {formatarData(titulo.data_promessa)}
                       </p>
                     )}
@@ -168,7 +168,7 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
 
                 {titulo.interacoes && titulo.interacoes.length > 0 && (
                   <div className="border-t border-borda bg-superficie-sutil p-4">
-                    <p className="text-xs font-semibold text-texto-fraco uppercase tracking-wide mb-3">
+                    <p className="text-legenda font-semibold text-texto-fraco uppercase tracking-wide mb-3">
                       Interações
                     </p>
                     <div className="space-y-3">
@@ -185,7 +185,7 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
                               <div className="w-px flex-1 bg-superficie-afundada mt-1" />
                             </div>
                             <div className="pb-3 flex-1">
-                              <p className="text-xs text-texto-fraco mb-1">
+                              <p className="text-legenda text-texto-fraco mb-1">
                                 {new Date(inter.data_envio).toLocaleString('pt-BR', {
                                   day: '2-digit',
                                   month: '2-digit',
@@ -194,12 +194,12 @@ export default async function ClienteHistoricoPage({ params }: PageProps) {
                                 })}
                               </p>
                               {inter.mensagem_enviada && (
-                                <div className="bg-superficie border border-borda rounded-lg p-2.5 text-xs text-texto-suave leading-relaxed italic">
+                                <div className="bg-superficie border border-borda rounded-lg p-2.5 text-legenda text-texto-suave leading-relaxed italic">
                                   &ldquo;{inter.mensagem_enviada}&rdquo;
                                 </div>
                               )}
                               {inter.resultado && (
-                                <p className="text-xs text-marca-700 font-semibold mt-1.5">
+                                <p className="text-legenda text-marca-700 font-semibold mt-1.5">
                                   → {inter.resultado}
                                 </p>
                               )}

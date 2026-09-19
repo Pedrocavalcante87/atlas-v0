@@ -37,7 +37,7 @@ export default function Navbar() {
                 key={href}
                 href={href}
                 aria-current={ativo ? 'page' : undefined}
-                className={`text-sm px-2.5 py-1.5 rounded-md transition-colors ${
+                className={`text-base px-2.5 py-1.5 rounded-md transition-colors ${
                   ativo
                     ? 'text-texto font-medium'
                     : 'text-texto-suave hover:text-texto hover:bg-superficie-afundada'
@@ -51,7 +51,7 @@ export default function Navbar() {
 
         <Link
           href="/upload"
-          className="inline-flex items-center h-8 px-3 text-[13px] font-medium rounded-md border border-borda-forte text-texto hover:bg-superficie-sutil transition-colors"
+          className="inline-flex items-center h-8 px-3 text-corpo font-medium rounded-md border border-borda-forte text-texto hover:bg-superficie-sutil transition-colors"
         >
           Importar planilha
         </Link>

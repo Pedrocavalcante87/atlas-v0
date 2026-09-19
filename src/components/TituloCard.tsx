@@ -64,7 +64,7 @@ export default function TituloCard({ titulo }: Props) {
     const label = STATUS_OPTIONS.find((s) => s.value === selected)?.label ?? 'Atualizado';
     return (
       <div className="flex items-center justify-between gap-3 px-3 py-2.5 bg-superficie-sutil border border-borda rounded-md">
-        <span className="text-[13px] text-texto-fraco line-through numero">
+        <span className="text-corpo text-texto-fraco line-through numero">
           {formatarMoeda(titulo.valor)}
         </span>
         <Badge tom={selected === 'pago' ? 'marca' : 'neutro'}>{label}</Badge>
@@ -83,7 +83,7 @@ export default function TituloCard({ titulo }: Props) {
     <div className="border border-borda rounded-md bg-superficie">
       <div className="flex items-center justify-between gap-3 px-3 py-2.5">
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="text-sm font-medium text-texto numero">
+          <span className="text-base font-medium text-texto numero">
             {formatarMoeda(titulo.valor)}
           </span>
           <Badge tom={tomDaCategoria(titulo.categoria)}>{rotuloPrazo}</Badge>
@@ -111,11 +111,11 @@ export default function TituloCard({ titulo }: Props) {
 
       {(erro || selected === 'promessa') && (
         <div className="px-3 pb-2.5 -mt-0.5">
-          {erro && <p className="text-[13px] text-risco-600">{erro}</p>}
+          {erro && <p className="text-corpo text-risco-600">{erro}</p>}
 
           {selected === 'promessa' && (
             <div className="flex gap-2 items-center">
-              <label htmlFor={`promessa-${titulo.id}`} className="text-[13px] text-texto-suave">
+              <label htmlFor={`promessa-${titulo.id}`} className="text-corpo text-texto-suave">
                 Pagamento prometido para
               </label>
               <input
@@ -123,7 +123,7 @@ export default function TituloCard({ titulo }: Props) {
                 type="date"
                 value={dataPromessa}
                 onChange={(e) => setDataPromessa(e.target.value)}
-                className="h-8 border border-borda-forte rounded-md px-2 text-[13px] bg-superficie text-texto"
+                className="h-8 border border-borda-forte rounded-md px-2 text-corpo bg-superficie text-texto"
               />
               <Botao
                 tamanho="sm"

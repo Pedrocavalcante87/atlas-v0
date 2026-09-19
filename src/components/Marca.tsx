@@ -48,7 +48,7 @@ export default function Marca({ apenasSimbolo = false, className = '' }: PropsMa
       {!apenasSimbolo && (
         // Tracking apertado e peso semibold: o wordmark precisa ler como marca,
         // não como um título qualquer da interface.
-        <span className="font-semibold text-[15px] tracking-[-0.02em] leading-none">Atlas</span>
+        <span className="font-semibold text-destaque tracking-[-0.02em] leading-none">Atlas</span>
       )}
     </span>
   );

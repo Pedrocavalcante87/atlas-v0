@@ -85,17 +85,17 @@ export default function ClienteCard({ grupo }: Props) {
           <div className="min-w-0">
             <Link
               href={`/clientes/${cliente.id}`}
-              className="text-[15px] font-medium text-texto hover:text-marca-700 transition-colors truncate block"
+              className="text-destaque font-medium text-texto hover:text-marca-700 transition-colors truncate block"
             >
               {cliente.nome}
             </Link>
-            <p className="text-[13px] text-texto-suave mt-0.5 numero">{cliente.telefone}</p>
+            <p className="text-corpo text-texto-suave mt-0.5 numero">{cliente.telefone}</p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-[17px] font-semibold text-texto numero leading-none">
+            <p className="text-titulo font-semibold text-texto numero leading-none">
               {formatarMoeda(valorTotal)}
             </p>
-            <p className="text-[13px] text-texto-suave mt-1">
+            <p className="text-corpo text-texto-suave mt-1">
               {titulos.length} {titulos.length !== 1 ? 'títulos' : 'título'}
             </p>
           </div>
@@ -103,7 +103,7 @@ export default function ClienteCard({ grupo }: Props) {
 
         {/* A mensagem é o produto: é o que o usuário vai enviar. Fundo sutil e
             borda esquerda de citação, para ler como texto e não como campo. */}
-        <p className="text-[13px] text-texto-suave leading-relaxed border-l-2 border-borda pl-3 mb-3">
+        <p className="text-corpo text-texto-suave leading-relaxed border-l-2 border-borda pl-3 mb-3">
           {mensagemConsolidada}
         </p>
 
@@ -124,7 +124,7 @@ export default function ClienteCard({ grupo }: Props) {
             registro dela é que não existe, e quem olhar o histórico depois não
             vai saber disso. */}
         {erro && (
-          <p role="alert" className="text-[13px] text-risco-600 mt-2">
+          <p role="alert" className="text-corpo text-risco-600 mt-2">
             {erro}
           </p>
         )}

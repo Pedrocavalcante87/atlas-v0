@@ -36,7 +36,7 @@ interface Props {
 export default function Badge({ tom = 'neutro', children, className = '' }: Props) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[11px] font-medium leading-none whitespace-nowrap ${TONS[tom]} ${className}`}
+      className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-micro font-medium leading-none whitespace-nowrap ${TONS[tom]} ${className}`}
     >
       {children}
     </span>

@@ -43,7 +43,7 @@ export default async function HomePage() {
       <main className="max-w-5xl mx-auto px-5 py-8">
         <div
           role="alert"
-          className="bg-risco-50 border border-risco-200 rounded-md px-4 py-3 text-sm text-risco-700"
+          className="bg-risco-50 border border-risco-200 rounded-md px-4 py-3 text-base text-risco-700"
         >
           {mensagem}
         </div>
@@ -75,8 +75,8 @@ export default async function HomePage() {
     <main className="max-w-5xl mx-auto px-5 py-7">
 
       <div className="mb-6">
-        <h1 className="text-lg font-semibold text-texto tracking-[-0.01em]">Lista do dia</h1>
-        <p className="text-[13px] text-texto-suave capitalize mt-0.5">{hoje}</p>
+        <h1 className="text-titulo font-semibold text-texto tracking-[-0.01em]">Lista do dia</h1>
+        <p className="text-corpo text-texto-suave capitalize mt-0.5">{hoje}</p>
       </div>
 
       {/* Indicadores. Uma faixa dividida por bordas verticais, não quatro
@@ -87,25 +87,25 @@ export default async function HomePage() {
       {(priorizados.length > 0 || (recuperado ?? 0) > 0) && (
         <div className="grid grid-cols-2 md:grid-cols-4 bg-superficie border border-borda rounded-lg mb-6 divide-y divide-borda md:divide-y-0 md:divide-x">
           <div className="px-4 py-3.5">
-            <p className="text-[12px] text-texto-suave mb-1">Vencidos</p>
-            <p className="text-[22px] font-semibold text-risco-600 numero leading-none">
+            <p className="text-legenda text-texto-suave mb-1">Vencidos</p>
+            <p className="text-cifra font-semibold text-risco-600 numero leading-none">
               {vencidos.length}
             </p>
           </div>
           <div className="px-4 py-3.5">
-            <p className="text-[12px] text-texto-suave mb-1">A vencer</p>
-            <p className="text-[22px] font-semibold text-atencao-600 numero leading-none">
+            <p className="text-legenda text-texto-suave mb-1">A vencer</p>
+            <p className="text-cifra font-semibold text-atencao-600 numero leading-none">
               {preventivos.length}
             </p>
           </div>
           <div className="px-4 py-3.5">
-            <p className="text-[12px] text-texto-suave mb-1">Em risco</p>
-            <p className="text-[22px] font-semibold text-texto numero leading-none truncate">
+            <p className="text-legenda text-texto-suave mb-1">Em risco</p>
+            <p className="text-cifra font-semibold text-texto numero leading-none truncate">
               {formatarMoeda(valorEmRisco)}
             </p>
           </div>
           <div className="px-4 py-3.5 bg-marca-50/60">
-            <p className="text-[12px] text-marca-700 mb-1">
+            <p className="text-legenda text-marca-700 mb-1">
               Recuperado
               <span className="text-texto-fraco font-normal">
                 {recuperado === null ? '' : ` · ${JANELA_RECUPERACAO_DIAS} dias`}
@@ -113,11 +113,11 @@ export default async function HomePage() {
             </p>
             {/* null = a apuração falhou. Mostrar "—" em vez de R$ 0,00: zero
                 seria uma afirmação falsa sobre dinheiro. */}
-            <p className="text-[22px] font-semibold text-marca-700 numero leading-none truncate">
+            <p className="text-cifra font-semibold text-marca-700 numero leading-none truncate">
               {recuperado === null ? '—' : formatarMoeda(recuperado)}
             </p>
             {recuperado === null && (
-              <p className="text-[12px] text-texto-fraco mt-1">indisponível</p>
+              <p className="text-legenda text-texto-fraco mt-1">indisponível</p>
             )}
           </div>
         </div>
@@ -128,14 +128,14 @@ export default async function HomePage() {
         // ninguém atrasado), e o que a tela precisa é dizer isso com clareza e
         // oferecer o próximo passo.
         <div className="bg-superficie border border-borda rounded-lg px-6 py-12 text-center">
-          <p className="text-[15px] font-medium text-texto">Nada para cobrar hoje</p>
-          <p className="text-[13px] text-texto-suave mt-1 mb-5 max-w-sm mx-auto">
+          <p className="text-destaque font-medium text-texto">Nada para cobrar hoje</p>
+          <p className="text-corpo text-texto-suave mt-1 mb-5 max-w-sm mx-auto">
             Nenhum título está vencido ou vence nos próximos 3 dias. Importe uma planilha para
             atualizar a carteira.
           </p>
           <Link
             href="/upload"
-            className="inline-flex items-center h-9 px-4 text-sm font-medium rounded-md bg-marca-700 text-white hover:bg-marca-800 transition-colors"
+            className="inline-flex items-center h-9 px-4 text-base font-medium rounded-md bg-marca-700 text-white hover:bg-marca-800 transition-colors"
           >
             Importar planilha
           </Link>
@@ -189,9 +189,9 @@ function SecaoTitulo({
 }) {
   return (
     <div className="flex items-baseline gap-2 mb-2.5">
-      <h2 className="text-[13px] font-semibold text-texto">{rotulo}</h2>
-      <span className="text-[13px] text-texto-fraco numero">{quantidade}</span>
-      <span className="text-[13px] text-texto-fraco">· {complemento}</span>
+      <h2 className="text-corpo font-semibold text-texto">{rotulo}</h2>
+      <span className="text-corpo text-texto-fraco numero">{quantidade}</span>
+      <span className="text-corpo text-texto-fraco">· {complemento}</span>
     </div>
   );
 }

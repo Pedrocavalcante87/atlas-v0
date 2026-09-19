@@ -98,9 +98,54 @@
      verdade (menu, popover). Superfície comum separa por BORDA. */
   --shadow-flutuante: 0 4px 16px -4px rgb(18 20 19 / 0.12), 0 1px 3px rgb(18 20 19 / 0.06);
 
-  /* --- Tipografia --------------------------------------------------------- */
+  /* --- Tipografia ---------------------------------------------------------
+     Duas famílias, com papéis separados — é daqui que vem a assinatura do
+     produto, já que a identidade não usa ornamento:
+
+       sans (Inter)      texto, rótulos, ações. Neutra de propósito.
+       mono (Plex Mono)  DINHEIRO e identificadores (telefone, datas curtas).
+
+     Números em mono não é estética: um painel de cobrança é lido varrendo
+     colunas de valores de cima a baixo, e a mono dá a cada dígito a mesma
+     largura e um desenho que não se confunde (o 0 tem corte, o 1 tem base).
+     Inter com tabular-nums já alinhava; a mono torna o número reconhecível
+     como número à distância, e cria o contraste que uma tela sem ornamento
+     precisa para não parecer chapada. */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-mono-numeros), ui-monospace, monospace;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+
+  /* --- Escala de tipo -----------------------------------------------------
+     Nomeada por PAPEL, não por tamanho. Existe porque a primeira versão deste
+     sistema saiu espalhando `text-[13px]`, `text-[15px]`, `text-[22px]` pelas
+     telas — que é o hábito que um sistema de design serve para eliminar.
+     Cada degrau traz altura de linha e espacejamento junto, porque tamanho
+     sem os dois não define nada. */
+  --text-micro: 11px;
+  --text-micro--line-height: 14px;
+  --text-micro--letter-spacing: 0.01em;
+
+  --text-legenda: 12px;
+  --text-legenda--line-height: 16px;
+
+  --text-corpo: 13px;
+  --text-corpo--line-height: 19px;
+
+  --text-base: 14px;
+  --text-base--line-height: 21px;
+
+  --text-destaque: 15px;
+  --text-destaque--line-height: 21px;
+  --text-destaque--letter-spacing: -0.006em;
+
+  --text-titulo: 18px;
+  --text-titulo--line-height: 24px;
+  --text-titulo--letter-spacing: -0.015em;
+
+  /* Valores dos indicadores. Tracking negativo: número grande em mono abre
+     demais e perde densidade. */
+  --text-cifra: 22px;
+  --text-cifra--line-height: 26px;
+  --text-cifra--letter-spacing: -0.02em;
 }
 
 /* ---------------------------------------------------------------------------
@@ -113,12 +158,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Todo número de dinheiro usa largura de dígito fixa. Sem isso, uma coluna de
-   valores "dança" a cada render e fica impossível comparar de relance — o que
-   é literalmente a tarefa do usuário na lista do dia. */
+/* Todo número de dinheiro e todo identificador (telefone, documento) usa a
+   mono, com largura de dígito fixa. Sem largura fixa a coluna de valores
+   "dança" a cada render e fica impossível comparar de relance — que é
+   literalmente a tarefa do usuário na lista do dia. */
 .numero {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em; /* Plex Mono é larga; sem isso o valor ocupa espaço demais */
 }
 
 /* Foco visível e consistente. Acessibilidade não é opcional num produto que

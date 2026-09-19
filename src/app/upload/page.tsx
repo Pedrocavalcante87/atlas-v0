@@ -144,12 +144,12 @@ export default function UploadPage() {
     <main className="max-w-3xl mx-auto px-4 py-6">
       <div className="mb-6">
         <div className="mb-1">
-          <Link href="/" className="text-texto-fraco hover:text-texto-suave text-sm transition-colors">
+          <Link href="/" className="text-texto-fraco hover:text-texto-suave text-base transition-colors">
             &larr; Lista do dia
           </Link>
         </div>
-        <h2 className="text-xl font-bold text-texto">Importar planilha</h2>
-        <p className="text-sm text-texto-suave mt-0.5">Suba um CSV para adicionar titulos a lista de cobranca</p>
+        <h2 className="text-cifra font-bold text-texto">Importar planilha</h2>
+        <p className="text-base text-texto-suave mt-0.5">Suba um CSV para adicionar titulos a lista de cobranca</p>
       </div>
 
       {confirmResult ? (
@@ -186,13 +186,13 @@ export default function UploadPage() {
                   {file ? (
                     <>
                       <div className="w-10 h-10 bg-marca-100 rounded-md flex items-center justify-center mx-auto mb-2">
-                        <span className="text-xl">&#128196;</span>
+                        <span className="text-cifra">&#128196;</span>
                       </div>
-                      <p className="text-marca-800 font-semibold text-sm">{file.name}</p>
-                      <p className="text-marca-500 text-xs mt-0.5">{(file.size / 1024).toFixed(1)} KB</p>
+                      <p className="text-marca-800 font-semibold text-base">{file.name}</p>
+                      <p className="text-marca-500 text-legenda mt-0.5">{(file.size / 1024).toFixed(1)} KB</p>
                       <button
                         type="button"
-                        className="text-xs text-texto-fraco mt-2 hover:text-texto-suave underline transition-colors"
+                        className="text-legenda text-texto-fraco mt-2 hover:text-texto-suave underline transition-colors"
                         onClick={(e) => {
                           e.preventDefault();
                           setFile(null);
@@ -206,23 +206,23 @@ export default function UploadPage() {
                   ) : (
                     <>
                       <div className="w-10 h-10 bg-superficie-afundada rounded-md flex items-center justify-center mx-auto mb-2">
-                        <span className="text-xl">&#128193;</span>
+                        <span className="text-cifra">&#128193;</span>
                       </div>
-                      <p className="text-texto-suave text-sm font-medium">Clique para selecionar o arquivo</p>
-                      <p className="text-texto-fraco text-xs mt-0.5">Somente .csv</p>
+                      <p className="text-texto-suave text-base font-medium">Clique para selecionar o arquivo</p>
+                      <p className="text-texto-fraco text-legenda mt-0.5">Somente .csv</p>
                     </>
                   )}
                 </div>
               </label>
 
               {preview && (
-                <div className="bg-marca-50 border border-marca-200 rounded-md p-3.5 flex items-start gap-2.5 text-sm">
+                <div className="bg-marca-50 border border-marca-200 rounded-md p-3.5 flex items-start gap-2.5 text-base">
                   <span className="shrink-0 mt-0.5">&#128269;</span>
                   <div>
                     <p className="text-marca-800 font-semibold">
                       {preview.linhas} {preview.linhas !== 1 ? 'linhas detectadas' : 'linha detectada'}
                     </p>
-                    <p className="text-marca-700 text-xs mt-0.5">
+                    <p className="text-marca-700 text-legenda mt-0.5">
                       Separador: {preview.separador} &middot; Clique em &quot;Analisar&quot; pra ver a prévia
                     </p>
                   </div>
@@ -230,7 +230,7 @@ export default function UploadPage() {
               )}
 
               {error && (
-                <div className="bg-risco-50 border border-risco-200 rounded-md p-3.5 flex gap-2.5 text-sm text-risco-700">
+                <div className="bg-risco-50 border border-risco-200 rounded-md p-3.5 flex gap-2.5 text-base text-risco-700">
                   <span className="shrink-0">&#9888;&#65039;</span>
                   <span className="whitespace-pre-wrap">{error}</span>
                 </div>
@@ -251,7 +251,7 @@ export default function UploadPage() {
                   </span>
                 ) : 'Analisar planilha'}
               </button>
-              <p className="text-xs text-texto-fraco text-center">
+              <p className="text-legenda text-texto-fraco text-center">
                 Isso só analisa o arquivo. Nada é gravado até você confirmar na próxima tela.
               </p>
             </form>
@@ -259,7 +259,7 @@ export default function UploadPage() {
 
           <div className="md:col-span-2 space-y-3">
             <div className="bg-superficie border border-borda rounded-lg p-4 ">
-              <p className="text-xs font-semibold text-texto-suave uppercase tracking-wide mb-3">Colunas esperadas</p>
+              <p className="text-legenda font-semibold text-texto-suave uppercase tracking-wide mb-3">Colunas esperadas</p>
               <div className="space-y-2">
                 {[
                   { col: 'nome', desc: 'Nome do cliente' },
@@ -268,12 +268,12 @@ export default function UploadPage() {
                   { col: 'data_vencimento', desc: 'DD/MM/AAAA ou AAAA-MM-DD' },
                 ].map(({ col, desc }) => (
                   <div key={col} className="flex items-start gap-2">
-                    <code className="text-xs bg-superficie-afundada text-texto px-1.5 py-0.5 rounded font-mono whitespace-nowrap">{col}</code>
-                    <span className="text-xs text-texto-fraco">{desc}</span>
+                    <code className="text-legenda bg-superficie-afundada text-texto px-1.5 py-0.5 rounded font-mono whitespace-nowrap">{col}</code>
+                    <span className="text-legenda text-texto-fraco">{desc}</span>
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-texto-fraco mt-3 leading-relaxed">
+              <p className="text-legenda text-texto-fraco mt-3 leading-relaxed">
                 O sistema detecta automaticamente variações de nomes como{' '}
                 <span className="font-mono">CLIENTE</span>,{' '}
                 <span className="font-mono">CELULAR</span>,{' '}
@@ -307,11 +307,11 @@ function PreviewReport({
 
   return (
     <div className="space-y-4">
-      <div className="bg-atencao-50 border border-atencao-200 rounded-md p-3.5 flex items-start gap-2.5 text-sm">
+      <div className="bg-atencao-50 border border-atencao-200 rounded-md p-3.5 flex items-start gap-2.5 text-base">
         <span className="shrink-0 mt-0.5">&#128203;</span>
         <div>
           <p className="text-atencao-700 font-semibold">Isso é uma prévia — nada foi gravado ainda</p>
-          <p className="text-atencao-700 text-xs mt-0.5">
+          <p className="text-atencao-700 text-legenda mt-0.5">
             Confira os números abaixo e só clique em &quot;Confirmar importação&quot; se estiver tudo certo.
           </p>
         </div>
@@ -322,36 +322,36 @@ function PreviewReport({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-white font-semibold text-base">Prévia da importação</p>
-              <p className="text-texto-fraco text-xs mt-0.5">
+              <p className="text-texto-fraco text-legenda mt-0.5">
                 {result.totalLinhas} {result.totalLinhas !== 1 ? 'linhas' : 'linha'} no arquivo &middot; separador: {result.separadorDetectado}
               </p>
             </div>
-            <span className="text-2xl">&#128202;</span>
+            <span className="text-cifra">&#128202;</span>
           </div>
         </div>
 
         <div className="grid grid-cols-3 divide-x divide-borda border-b border-borda">
           <div className="px-4 py-3 text-center">
-            <p className="text-xl font-bold text-marca-700">{result.count}</p>
-            <p className="text-xs text-texto-suave mt-0.5">Prontos p/ importar</p>
+            <p className="text-cifra font-bold text-marca-700">{result.count}</p>
+            <p className="text-legenda text-texto-suave mt-0.5">Prontos p/ importar</p>
           </div>
           <div className="px-4 py-3 text-center">
-            <p className={`text-xl font-bold ${result.duplicatas > 0 ? 'text-atencao-500' : 'text-texto-fraco'}`}>{result.duplicatas}</p>
-            <p className="text-xs text-texto-suave mt-0.5">Duplicatas</p>
+            <p className={`text-cifra font-bold ${result.duplicatas > 0 ? 'text-atencao-500' : 'text-texto-fraco'}`}>{result.duplicatas}</p>
+            <p className="text-legenda text-texto-suave mt-0.5">Duplicatas</p>
           </div>
           <div className="px-4 py-3 text-center">
-            <p className={`text-xl font-bold ${totalIgnoradas > 0 ? 'text-risco-500' : 'text-texto-fraco'}`}>{totalIgnoradas}</p>
-            <p className="text-xs text-texto-suave mt-0.5">Ignoradas</p>
+            <p className={`text-cifra font-bold ${totalIgnoradas > 0 ? 'text-risco-500' : 'text-texto-fraco'}`}>{totalIgnoradas}</p>
+            <p className="text-legenda text-texto-suave mt-0.5">Ignoradas</p>
           </div>
         </div>
 
         <div className="px-5 py-4 border-b border-borda">
-          <p className="text-xs font-semibold text-texto-suave uppercase tracking-wide mb-2">Colunas identificadas</p>
+          <p className="text-legenda font-semibold text-texto-suave uppercase tracking-wide mb-2">Colunas identificadas</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             {Object.entries(result.colunasDetectadas).map(([canonical, mapped]) => (
               <div key={canonical} className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-marca-500 shrink-0" />
-                <span className="text-xs text-texto-suave font-mono truncate">{mapped}</span>
+                <span className="text-legenda text-texto-suave font-mono truncate">{mapped}</span>
               </div>
             ))}
           </div>
@@ -361,8 +361,8 @@ function PreviewReport({
       {result.count > 0 && (
         <div className="bg-superficie border border-borda rounded-lg overflow-hidden">
           <div className="px-5 py-4 border-b border-borda">
-            <p className="text-sm font-semibold text-texto">Análise financeira do que seria importado</p>
-            <p className="text-xs text-texto-fraco mt-0.5">
+            <p className="text-base font-semibold text-texto">Análise financeira do que seria importado</p>
+            <p className="text-legenda text-texto-fraco mt-0.5">
               Total: <span className="font-semibold text-texto">{moeda(result.totalValor)}</span>
             </p>
           </div>
@@ -399,29 +399,29 @@ function PreviewReport({
       {temProblemas && (
         <div className="bg-superficie border border-borda rounded-lg overflow-hidden">
           <div className="px-5 py-4 border-b border-borda">
-            <p className="text-sm font-semibold text-texto">Linhas que não vão ser importadas</p>
-            <p className="text-xs text-texto-fraco mt-0.5">Revise o arquivo original para corrigir estas entradas, se quiser</p>
+            <p className="text-base font-semibold text-texto">Linhas que não vão ser importadas</p>
+            <p className="text-legenda text-texto-fraco mt-0.5">Revise o arquivo original para corrigir estas entradas, se quiser</p>
           </div>
 
           {result.duplicatas > 0 && (
             <div className="px-5 py-3 flex items-center gap-3 border-b border-borda bg-atencao-50">
               <div>
-                <p className="text-sm font-semibold text-atencao-700">
+                <p className="text-base font-semibold text-atencao-700">
                   {result.duplicatas} {result.duplicatas !== 1 ? 'titulos duplicados' : 'titulo duplicado'}
                 </p>
-                <p className="text-xs text-atencao-600">Ja existem no sistema com mesmo cliente, valor e data de vencimento</p>
+                <p className="text-legenda text-atencao-600">Ja existem no sistema com mesmo cliente, valor e data de vencimento</p>
               </div>
             </div>
           )}
 
           {result.linhasIgnoradas.map((item, i) => (
             <div key={i} className="px-5 py-3 flex items-start gap-3 border-b border-borda last:border-0">
-              <span className="text-risco-500 text-sm shrink-0 mt-0.5">x</span>
+              <span className="text-risco-500 text-base shrink-0 mt-0.5">x</span>
               <div className="min-w-0">
-                <p className="text-sm text-texto font-medium">
+                <p className="text-base text-texto font-medium">
                   Linha {item.linha}{item.nome ? ` — ${item.nome}` : ''}
                 </p>
-                <p className="text-xs text-risco-600 mt-0.5">{item.motivo}</p>
+                <p className="text-legenda text-risco-600 mt-0.5">{item.motivo}</p>
               </div>
             </div>
           ))}
@@ -492,25 +492,25 @@ function ConfirmedReport({
 
   return (
     <div className="space-y-4">
-      <div className={`${estilo.caixa} border rounded-md p-3.5 flex items-start gap-2.5 text-sm`}>
+      <div className={`${estilo.caixa} border rounded-md p-3.5 flex items-start gap-2.5 text-base`}>
         <span className="shrink-0 mt-0.5">{estilo.icone}</span>
         <div>
           <p className={`${estilo.titulo} font-semibold`}>{estilo.rotulo}</p>
-          <p className={`${estilo.texto} text-xs mt-0.5`}>{result.message}</p>
+          <p className={`${estilo.texto} text-legenda mt-0.5`}>{result.message}</p>
         </div>
       </div>
 
       {result.errors.length > 0 && (
         <div className="bg-superficie border border-borda rounded-lg overflow-hidden">
           <div className="px-5 py-4 border-b border-borda">
-            <p className="text-sm font-semibold text-texto">
+            <p className="text-base font-semibold text-texto">
               {result.resultado === 'indisponivel'
                 ? 'O que aconteceu'
                 : 'Erros durante a gravação'}
             </p>
           </div>
           {result.errors.map((err, i) => (
-            <div key={i} className="px-5 py-3 border-b border-borda last:border-0 text-sm text-risco-600">
+            <div key={i} className="px-5 py-3 border-b border-borda last:border-0 text-base text-risco-600">
               {err}
             </div>
           ))}
@@ -518,7 +518,7 @@ function ConfirmedReport({
       )}
 
       {result.resultado === 'indisponivel' && (
-        <p className="text-xs text-texto-suave leading-relaxed px-1">
+        <p className="text-legenda text-texto-suave leading-relaxed px-1">
           Nenhum dado do arquivo foi perdido. Assim que a conexão voltar, importe o mesmo arquivo
           de novo: os títulos que chegaram a ser gravados serão reconhecidos como duplicata e não
           entrarão duas vezes.
@@ -571,13 +571,13 @@ function BreakdownRow({
         <div className="flex items-start gap-2">
           <span className={`w-2 h-2 rounded-full ${dot} shrink-0 mt-1.5`} />
           <div>
-            <p className="text-sm font-semibold text-texto">{label}</p>
-            <p className="text-xs text-texto-fraco mt-0.5">{hint}</p>
+            <p className="text-base font-semibold text-texto">{label}</p>
+            <p className="text-legenda text-texto-fraco mt-0.5">{hint}</p>
           </div>
         </div>
         <div className="text-right shrink-0">
           <p className={`text-base font-bold ${valorColor}`}>{moeda(valor)}</p>
-          <p className="text-xs text-texto-fraco">{count} {count !== 1 ? 'titulos' : 'titulo'} &middot; {pct}%</p>
+          <p className="text-legenda text-texto-fraco">{count} {count !== 1 ? 'titulos' : 'titulo'} &middot; {pct}%</p>
         </div>
       </div>
       <div className="h-1.5 bg-superficie-afundada rounded-full overflow-hidden">
