@@ -85,45 +85,175 @@ export function normalizarValor(raw: string): number {
     } else {
       s = s.replace(/,/g, '');
     }
+  } else if (temPonto) {
+    // Só pontos, nenhuma vírgula — o caso onde mora o defeito do §5.3.
+    //
+    // O que decide é a forma dos grupos DEPOIS de cada ponto. Separador de
+    // milhar sempre deixa grupos de exatamente três dígitos; decimal deixa um
+    // ou dois. Três situações, e só uma delas é ambígua de verdade:
+    const grupos = s.split('.').slice(1);
+    const todosDeTres = grupos.every((g) => /^\d{3}$/.test(g));
+
+    if (grupos.length > 1) {
+      // DOIS OU MAIS pontos: não existe número com duas partes decimais, então
+      // milhar é a única leitura possível — não há escolha a fazer, e por isso
+      // isto não invade o §5.3. Antes, `parseFloat('1.234.567')` parava no
+      // segundo ponto e devolvia 1.234: R$ 1,2 milhão virava R$ 1,23.
+      //
+      // Se os grupos não são todos de três (`1.500.00`), o texto não é milhar
+      // nem decimal em convenção nenhuma — é formato que não sabemos ler, e
+      // limpar os pontos daria 150000, um número inventado.
+      if (!todosDeTres) return NaN;
+      s = s.replace(/\./g, '');
+    } else if (todosDeTres) {
+      // UM ponto com exatamente três dígitos: `1.500` é mil e quinhentos em
+      // convenção BR e um e meio em US. As duas leituras são legítimas e a
+      // célula sozinha não decide — é exatamente o §5.3.
+      //
+      // Recusamos em vez de adivinhar. Assumir decimal gravava R$ 1,50 no lugar
+      // de R$ 1.500 em silêncio; assumir milhar cobraria 1000x a mais de quem
+      // exporta em US. Número de dinheiro não se inventa (CLAUDE.md), e célula
+      // que não parseia vira linha rejeitada com motivo (PLANEJAMENTO.md §9,
+      // barreira #5). Quem explica o porquê ao usuário é `motivoValorRecusado`.
+      //
+      // Isto NÃO antecipa a Fase 1: não escolhe convenção nenhuma. Quando o
+      // formato passar a ser decidido por coluna, estas linhas voltam a ser
+      // aceitas — com o valor certo.
+      return NaN;
+    }
+    // Um ponto com um, dois ou 4+ dígitos (`1500.00`, `1500.5`) é decimal sem
+    // ambiguidade: milhar teria exatamente três. parseFloat resolve.
   }
 
   return parseFloat(s);
 }
 
+/**
+ * Monta AAAA-MM-DD recusando dia/mês que não existem no calendário.
+ *
+ * Sem esta checagem, um arquivo em formato americano (MM/DD/AAAA) produzia
+ * data impossível em silêncio: `10/25/2026` virava `"2026-25-10"` — mês 25.
+ * Isso passava o regex de `validarLinhaRecebida` e só era barrado adiante por
+ * `dataEmFaixaRazoavel`, porque `new Date` devolve `Invalid Date` — ou seja, a
+ * linha era recusada com o motivo ERRADO ("mais de 5 anos no passado ou no
+ * futuro"), mandando o usuário procurar um problema que não existe. Recusar
+ * aqui produz o diagnóstico certo.
+ *
+ * O que isto NÃO resolve, de propósito: `03/04/2026` é 3 de abril em DD/MM e
+ * 4 de março em MM/DD, e as duas leituras são válidas. Uma célula isolada não
+ * tem como decidir — só a coluna inteira tem (ver PLANEJAMENTO.md §5.3 e a
+ * Fase 1). Aqui recusamos o impossível, não o ambíguo.
+ */
+function montarDataISO(dia: string, mes: string, ano: string): string | null {
+  const d = Number(dia);
+  const m = Number(mes);
+  if (!(m >= 1 && m <= 12) || !(d >= 1 && d <= 31)) return null;
+  return `${ano}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/**
+ * Por que este texto de valor foi recusado, em linguagem que diz o que fazer.
+ *
+ * Existe porque `normalizarValor` devolve `NaN` para dois motivos bem
+ * diferentes, e "Valor inválido" para os dois manda o usuário procurar um erro
+ * de digitação quando o problema é o formato da planilha inteira. Uma recusa
+ * que não diz como sair dela é quase tão ruim quanto o valor errado que ela
+ * veio evitar.
+ */
+export function motivoValorRecusado(raw: string): string {
+  const s = raw.trim().replace(/^R\$\s*/, '').replace(/^\$\s*/, '').trim();
+  const grupos = s.includes(',') ? [] : s.split('.').slice(1);
+
+  if (grupos.length === 1 && /^\d{3}$/.test(grupos[0])) {
+    // As duas leituras, escritas como o usuário as veria na tela. A decimal é
+    // calculada, não montada por substituição de texto: "1.500" lido como
+    // decimal é 1,5 — ou seja R$ 1,50, e não "R$ 1,500", que nem existe em real.
+    const comoMilhar = `${s.replace('.', '.')},00`;
+    const comoDecimal = parseFloat(s).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return (
+      `Valor ambíguo — "${raw.trim()}" pode significar R$ ${comoMilhar} ` +
+      `(ponto como milhar) ou R$ ${comoDecimal} (ponto como decimal). ` +
+      `Escreva com os centavos ("${comoMilhar}") ou sem separador ` +
+      `("${s.replace('.', '')}") para não deixar dúvida.`
+    );
+  }
+
+  if (grupos.length > 1 && !grupos.every((g) => /^\d{3}$/.test(g))) {
+    return (
+      `Valor em formato não reconhecido — "${raw.trim()}" tem mais de um ponto, ` +
+      `mas os grupos não são de três dígitos, então não é separador de milhar ` +
+      `nem decimal. Confira a coluna de valor na planilha.`
+    );
+  }
+
+  return `Valor inválido — "${raw.trim()}"`;
+}
+
 export function normalizarData(raw: string): string | null {
   const s = raw.trim();
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Ano primeiro: dia e mês estão em posição conhecida, mas ainda precisam
+  // existir — "2026-25-10" chegava até aqui e era devolvido como se fosse
+  // válido, só porque tinha o formato certo.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-');
+    return montarDataISO(d, m, y);
+  }
 
   if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
     const [d, m, y] = s.split('/');
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    return montarDataISO(d, m, y);
   }
 
   if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) {
     const [d, m, y] = s.split('-');
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    return montarDataISO(d, m, y);
   }
 
   if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(s)) {
     const [d, m, y] = s.split('.');
-    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    return montarDataISO(d, m, y);
   }
 
   if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) {
-    return s.replace(/\//g, '-');
+    const [y, m, d] = s.split('/');
+    return montarDataISO(d, m, y);
   }
 
   if (/^\d{8}$/.test(s)) {
-    return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+    return montarDataISO(s.slice(6, 8), s.slice(4, 6), s.slice(0, 4));
   }
 
   return null;
 }
 
+/**
+ * Quantos dígitos tem um número brasileiro que JÁ inclui o DDI: 55 + DDD (2) +
+ * assinante (8 em fixo, 9 em celular). Sem DDI são 10 ou 11.
+ */
+const DIGITOS_COM_DDI = new Set([12, 13]);
+
+/**
+ * Normaliza o telefone para o formato que o link `wa.me` espera (só dígitos,
+ * com DDI).
+ *
+ * O teste `startsWith('55')` sozinho não decide, e isso tinha consequência
+ * real: **55 também é o DDD de Santa Maria/RS**. Um celular de lá,
+ * `(55) 99999-8888`, vira `55999998888` — 11 dígitos, começa com 55 — e era
+ * lido como "já tem DDI". O número ia para o banco sem país, passava a
+ * validação de 10 a 15 dígitos sem reclamar, e o link de WhatsApp apontava
+ * para outro número. Cobrança enviada para a pessoa errada, sem nenhum aviso.
+ *
+ * O comprimento desempata: `55` só é DDI se o total já for de número completo
+ * com DDI (12 ou 13 dígitos). Com 10 ou 11, o `55` inicial é DDD e o DDI falta.
+ */
 export function limparTelefone(tel: string): string {
   const digits = tel.replace(/\D/g, '');
-  return digits.startsWith('55') ? digits : `55${digits}`;
+  const temDDI = digits.startsWith('55') && DIGITOS_COM_DDI.has(digits.length);
+  return temDDI ? digits : `55${digits}`;
 }
 
 // Um ano pra cada lado é uma faixa generosa pra atraso/adiantamento real de

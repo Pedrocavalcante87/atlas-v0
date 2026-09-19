@@ -278,7 +278,7 @@ era possível ver "0 títulos" por falha de leitura e clicar em "Limpar tudo" lo
 | Agrupamento por cliente + mensagem consolidada | `lib/prioridade.ts::agruparPorCliente`, `lib/templates.ts::gerarMensagemConsolidada` | Centralizado **e renderizado** (`ClienteCard.tsx`, usado por `app/page.tsx`) |
 | Templates de mensagem | `lib/templates.ts` | Centralizado |
 | Reconhecimento de colunas do CSV (aliases) | `lib/csv-import.ts::COLUMN_ALIASES` | Compartilhado por prévia e confirmação |
-| Normalização de valor/data/telefone do CSV | `lib/csv-import.ts` | Módulo de domínio sem I/O, testado (`csv-import.test.ts`) |
+| Normalização de valor/data/telefone do CSV | `lib/csv-import.ts` | Módulo de domínio sem I/O, testado (`csv-import.test.ts`). Recusa o **impossível** (mês 25, dia 32) e resolve o **inequívoco** (`1.234.567` = milhar; `55` inicial só é DDI se o número tiver 12–13 dígitos). Não decide o **ambíguo**: `"1.500"` segue lido como decimal — ver PLANEJAMENTO.md §5.3 |
 | Revalidação estrutural de linha recebida | `lib/csv-import.ts::validarLinhaRecebida` | Usada por `confirmar/route.ts` antes de gravar — não existia antes |
 | Regra de duplicata na importação | `lib/csv-import.ts::planejarImportacao` (decisão) **+** `idx_titulos_aberto_unico` no Postgres (garantia) | Uma implementação só, chamada pela prévia e pela confirmação. A garantia real é do banco — a checagem em memória serve para relatar e evitar ida desnecessária |
 | "Valor vencido" nas estatísticas administrativas | `api/dados/route.ts` (via `calcularDiasAtraso`) | Reaproveita a fonte oficial — antes comparava strings ISO com lógica própria |
@@ -462,7 +462,7 @@ deles.
 
 - Sem camada de repositório: mudar um nome de coluna ou tabela exige busca manual em todos os
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
-- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **168 casos**, todos
+- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **184 casos**, todos
   em `src/lib/`. Cobrem score e categorização (`prioridade`), parsing e planejamento do lote
   (`csv-import`), apuração (`recuperacao`), classificação de falha e paginação por cursor
   (`supabase-io`), a máquina de estados de conflito (`importacao`) e a assinatura/expiração do

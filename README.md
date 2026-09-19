@@ -141,6 +141,18 @@ duas vezes.
 | Formato BR com milhar | `1.500,00` |
 | Formato US com milhar | `1,500.00` |
 | Com símbolo de moeda | `R$ 1.500,00` |
+| Milhar com vários pontos | `1.234.567` |
+
+> ⚠️ **Valor ambíguo é recusado, não adivinhado.** Um número com **um ponto e exatamente três
+> dígitos depois, sem centavos** — `1.500`, `2.850` — pode significar mil e quinhentos (ponto como
+> milhar, BR) ou um e cinquenta (ponto como decimal, US). Como as duas leituras são legítimas, o
+> Atlas **não escolhe**: a linha aparece na prévia como ignorada, com a explicação e as duas
+> formas de resolver — escrever com centavos (`1.500,00`) ou sem separador (`1500`).
+>
+> Isso é deliberado. Antes o sistema assumia decimal e gravava **R$ 1,50 no lugar de R$ 1.500**,
+> sem avisar. Uma cobrança recusada e visível é melhor que uma cobrança errada e silenciosa.
+> Decidir o formato automaticamente, olhando a coluna inteira, está planejado (`PLANEJAMENTO.md`
+> §5.3).
 
 **Formatos aceitos para a data:**
 
@@ -152,6 +164,12 @@ duas vezes.
 | DD.MM.AAAA | `15.08.2025` |
 | AAAA/MM/DD | `2025/08/15` |
 | AAAAMMDD (compacto) | `20250815` |
+
+> ⚠️ **Data no formato americano (MM/DD/AAAA) não é aceita.** O dia vem primeiro. Uma linha como
+> `10/25/2026` é recusada com "data inválida", porque não existe mês 25. Mas atenção ao caso que o
+> sistema **não** consegue detectar: quando dia e mês são ambos 12 ou menos — `03/04/2026` — a
+> data entra como **3 de abril**, não 4 de março, sem nenhum aviso. Se a planilha veio de um
+> sistema em inglês, converta as datas antes de importar.
 
 **Separadores aceitos:** vírgula (`,`), ponto e vírgula (`;`), tabulação (`tab`) e pipe (`|`).
 
@@ -328,7 +346,7 @@ uma cobrança nova.
 | Banco de dados | Supabase (PostgreSQL) |
 | Parse de CSV | PapaParse |
 | Autenticação | Cookie HTTP-only assinado (HMAC) + proxy |
-| Testes | Vitest (168 casos, domínio, política de I/O e sessão) |
+| Testes | Vitest (184 casos, domínio, política de I/O e sessão) |
 
 ---
 

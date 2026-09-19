@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizarValor,
+  motivoValorRecusado,
   normalizarData,
   limparTelefone,
   detectarMapeamentoColunas,
@@ -46,6 +47,64 @@ describe('normalizarValor', () => {
   it('trata milhar sem decimal (vírgula com 3+ dígitos depois) como separador de milhar', () => {
     expect(normalizarValor('1,500')).toBe(1500);
   });
+
+  // Dois ou mais pontos não têm leitura alternativa: não existe número com duas
+  // partes decimais. Antes, parseFloat parava no segundo ponto e R$ 1.234.567
+  // virava R$ 1,23.
+  it('lê múltiplos pontos como separador de milhar', () => {
+    expect(normalizarValor('1.234.567')).toBe(1234567);
+    expect(normalizarValor('12.345.678')).toBe(12345678);
+    expect(normalizarValor('R$ 1.234.567')).toBe(1234567);
+  });
+
+  it('não confunde ponto decimal com milhar quando há um ponto só', () => {
+    // Guarda contra uma correção "esperta" demais que passasse a limpar todo
+    // ponto: aqui a leitura decimal é a única razoável (milhar tem 3 dígitos).
+    expect(normalizarValor('1500.00')).toBe(1500);
+    expect(normalizarValor('1500.5')).toBe(1500.5);
+  });
+
+  // O §5.3 do PLANEJAMENTO.md: "1.500" é mil e quinhentos em BR e um e meio em
+  // US. Antes o sistema assumia decimal e gravava R$ 1,50 em silêncio. Agora
+  // recusa, porque número de dinheiro não se inventa — e recusar não escolhe
+  // convenção nenhuma, então a decisão por coluna da Fase 1 segue possível.
+  it('recusa valor ambíguo (um ponto, exatamente três dígitos)', () => {
+    expect(normalizarValor('1.500')).toBeNaN();
+    expect(normalizarValor('2.850')).toBeNaN();
+    expect(normalizarValor('R$ 1.500')).toBeNaN();
+  });
+
+  it('recusa formato que não é milhar nem decimal', () => {
+    // Grupos de tamanhos diferentes: limpar os pontos daria 150000, inventado.
+    expect(normalizarValor('1.500.00')).toBeNaN();
+    expect(normalizarValor('1.23.456')).toBeNaN();
+  });
+
+  it('continua aceitando o que é inequívoco', () => {
+    expect(normalizarValor('1500')).toBe(1500);
+    expect(normalizarValor('1.500,00')).toBe(1500);
+    expect(normalizarValor('1,500.00')).toBe(1500);
+    expect(normalizarValor('1.234.567')).toBe(1234567);
+  });
+});
+
+describe('motivoValorRecusado', () => {
+  it('explica a ambiguidade e diz como resolver', () => {
+    const m = motivoValorRecusado('1.500');
+    expect(m).toContain('ambíguo');
+    expect(m).toContain('1.500,00'); // a saída sugerida com centavos
+    expect(m).toContain('1500');     // a saída sugerida sem separador
+  });
+
+  it('distingue formato não reconhecido de ambiguidade', () => {
+    expect(motivoValorRecusado('1.500.00')).toContain('não reconhecido');
+    expect(motivoValorRecusado('1.500.00')).not.toContain('ambíguo');
+  });
+
+  it('cai no motivo genérico para lixo', () => {
+    expect(motivoValorRecusado('abc')).toContain('Valor inválido');
+    expect(motivoValorRecusado('')).toContain('Valor inválido');
+  });
 });
 
 describe('normalizarData', () => {
@@ -82,6 +141,39 @@ describe('normalizarData', () => {
     expect(normalizarData('não é uma data')).toBeNull();
     expect(normalizarData('')).toBeNull();
   });
+
+  // Arquivo em formato americano (MM/DD/AAAA). Antes isto virava "2026-25-10"
+  // — mês 25 — e era recusado adiante com o motivo errado ("mais de 5 anos no
+  // passado ou no futuro"), mandando o usuário caçar um problema inexistente.
+  it('recusa mês fora de 1-12 em vez de produzir data impossível', () => {
+    expect(normalizarData('10/25/2026')).toBeNull();
+    expect(normalizarData('10-25-2026')).toBeNull();
+    expect(normalizarData('10.25.2026')).toBeNull();
+  });
+
+  it('recusa dia fora de 1-31', () => {
+    expect(normalizarData('32/10/2026')).toBeNull();
+    expect(normalizarData('00/10/2026')).toBeNull();
+  });
+
+  it('recusa mês zero', () => {
+    expect(normalizarData('15/00/2026')).toBeNull();
+  });
+
+  // O formato ano-primeiro também chegava intacto se o texto "parecesse" certo.
+  it('recusa data impossível mesmo já em AAAA-MM-DD', () => {
+    expect(normalizarData('2026-25-10')).toBeNull();
+    expect(normalizarData('2026-13-01')).toBeNull();
+    expect(normalizarData('2026/25/10')).toBeNull();
+    expect(normalizarData('20262510')).toBeNull();
+  });
+
+  // Limite de irredutibilidade: com dia e mês ambos <= 12 as duas leituras são
+  // válidas e a célula sozinha não decide. Continua entrando como DD/MM — só a
+  // coluna inteira pode provar o contrário (PLANEJAMENTO.md §5.3, Fase 1).
+  it('ainda lê DD/MM quando as duas leituras são possíveis', () => {
+    expect(normalizarData('03/04/2026')).toBe('2026-04-03');
+  });
 });
 
 describe('limparTelefone', () => {
@@ -95,6 +187,23 @@ describe('limparTelefone', () => {
 
   it('adiciona 55 quando ausente', () => {
     expect(limparTelefone('11999990000')).toBe('5511999990000');
+  });
+
+  // 55 é o DDD de Santa Maria/RS. Um celular de lá começa com 55 e NÃO tem DDI
+  // — antes era lido como se tivesse, ia ao banco sem país, passava a validação
+  // de 10-15 dígitos e o link wa.me apontava para outro número.
+  it('adiciona DDI a número do DDD 55 (não confunde DDD com DDI)', () => {
+    expect(limparTelefone('(55) 99999-8888')).toBe('5555999998888');
+    expect(limparTelefone('55999998888')).toBe('5555999998888');
+  });
+
+  it('adiciona DDI a fixo do DDD 55 (10 dígitos)', () => {
+    expect(limparTelefone('5533334444')).toBe('555533334444');
+  });
+
+  it('preserva número que já tem DDI, com 12 ou 13 dígitos', () => {
+    expect(limparTelefone('5511999990000')).toBe('5511999990000'); // celular, 13
+    expect(limparTelefone('551133334444')).toBe('551133334444');   // fixo, 12
   });
 });
 
