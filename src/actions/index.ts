@@ -1,10 +1,51 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { supabase } from '@/lib/supabase';
 import { gravar, ler } from '@/lib/supabase-io';
 import { calcularSilenciadoAte } from '@/lib/prioridade';
+import { sessaoValida } from '@/lib/sessao';
 import { StatusTitulo } from '@/types';
+
+/**
+ * Revalida a sessão DENTRO da ação, em vez de confiar no gate de `src/proxy.ts`.
+ *
+ * Não é redundância: uma Server Action não é uma rota própria. Ela chega como
+ * POST na rota onde é usada, então a cobertura dela depende inteiramente do
+ * `matcher` do Proxy — e mudar esse matcher, ou mover um componente para outra
+ * rota, remove a proteção **em silêncio**, sem erro de compilação e sem teste
+ * que pegue. A documentação do Next 16 é explícita a respeito:
+ *
+ *   "A page-level authentication check does not extend to the Server Actions
+ *    defined within it. Always re-verify inside the action."
+ *   "treat Server Actions as reachable via direct POST requests and verify
+ *    authentication and authorization inside each one."
+ *   (node_modules/next/dist/docs/01-app/02-guides/data-security.md)
+ *
+ * Estas duas ações gravam histórico de cobrança e mudam status de título —
+ * dado financeiro. O custo de checar é uma leitura de cookie.
+ *
+ * O comportamento sem `APP_PASSWORD` espelha `src/proxy.ts` de propósito: em
+ * desenvolvimento libera (o risco é local e rodar sem senha é conveniente), em
+ * produção recusa. Divergir do proxy aqui criaria um caso em que a página abre
+ * e os botões não funcionam, sem explicação.
+ */
+async function exigirSessao(): Promise<void> {
+  const appPassword = process.env.APP_PASSWORD;
+
+  if (!appPassword) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Atlas não está configurado: defina APP_PASSWORD.');
+    }
+    return;
+  }
+
+  const cookie = (await cookies()).get('atlas_auth')?.value;
+  if (!sessaoValida(appPassword, cookie)) {
+    throw new Error('Sua sessão expirou. Entre de novo para continuar.');
+  }
+}
 
 /**
  * Registra que uma mensagem foi enviada, ANTES de sabermos o resultado.
@@ -13,6 +54,8 @@ import { StatusTitulo } from '@/types';
  * garantir que o histórico exista mesmo se ninguém voltar pra marcar status.
  */
 export async function registrarEnvio(tituloId: string, mensagem: string) {
+  await exigirSessao();
+
   // Falhar alto, pelo mesmo motivo de atualizarStatusTitulo abaixo: o envio
   // acontece FORA do app, então esta linha é a única prova de que a cobrança
   // foi feita. Engolir o erro fazia o histórico sumir sem ninguém notar — e o
@@ -46,6 +89,8 @@ export async function atualizarStatusTitulo(
   mensagemGerada: string,
   dataPromessa?: string,
 ) {
+  await exigirSessao();
+
   const { data: pendente } = await ler<{ id: string } | null>(
     (sinal) =>
       supabase

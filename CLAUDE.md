@@ -396,6 +396,7 @@ Cada um está garantido por mecanismo, não por disciplina de quem escreve o có
 | Nenhuma requisição fica pendurada indefinidamente | Prazos de 8s/15s em `supabase-io.ts` |
 | `service_role` nunca chega ao navegador | Só `lib/supabase.ts` a lê; nenhum Client Component o importa |
 | Sessão só vale se este servidor a emitiu, e só até expirar | `lib/sessao.ts`: HMAC-SHA256 com chave derivada de `APP_PASSWORD`, expiração dentro da carga assinada |
+| Mutação de dado financeiro nunca roda sem sessão válida | `proxy.ts` (gate de rota) **e** `exigirSessao()` no topo de cada Server Action — duas camadas, porque Server Action não é rota própria |
 
 ## Leitura de listas — o PostgREST corta em 1000 linhas
 
@@ -546,9 +547,14 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md` §Runtime). Por
   isso `lib/sessao.ts` pode usar `node:crypto` direto. Se algum dia o Proxy voltar ao Edge, essa
   importação quebra e o caminho é Web Crypto (`crypto.subtle`, assíncrono).
-- **Server Actions não checam autenticação sozinhas** — dependem do matcher do Proxy, e a doc do
-  Next 16 avisa que mudar o matcher ou mover a ação de rota remove a proteção em silêncio (ver
-  ARCHITECTURE.md §9). Ao tocar `actions/index.ts`, considere validar a sessão no topo da ação.
+- **Toda Server Action revalida a sessão por conta própria** (`exigirSessao()` em
+  `actions/index.ts`), antes de qualquer I/O. **Ação nova nasce com essa chamada no topo** — uma
+  Server Action não é rota própria, chega como POST na rota onde é usada, e confiar só no matcher
+  do Proxy significa que mover um componente de rota remove a proteção sem erro de compilação e
+  sem teste que pegue. É exigência explícita da doc do Next 16
+  (`node_modules/next/dist/docs/01-app/02-guides/data-security.md`), não preferência.
+  O comportamento sem `APP_PASSWORD` espelha `proxy.ts` de propósito (dev libera, produção recusa);
+  divergir criaria página que abre com botões que não funcionam.
 - Comparação de senha em `api/login/route.ts` usa `crypto.timingSafeEqual` (constant-time).
 - Login tem rate limiting em memória (10 tentativas / 5 min / IP), com a mecânica em
   `lib/rate-limit.ts` — não sobrevive a restart nem é compartilhado entre instâncias; ok para o
