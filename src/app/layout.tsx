@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import NavbarWrapper from "@/components/NavbarWrapper";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Inter com `variable` e sem pesos fixos: a variável cobre 100–900, então
+// hierarquia é feita por peso sem baixar um arquivo por corte. É a escolha
+// padrão de produto financeiro por um motivo prático — os algarismos têm
+// largura tabular nativa (ver `.numero` em globals.css), que é o que mantém
+// uma coluna de valores alinhada e comparável de relance.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -24,11 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="pt-BR"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-slate-100">
+    <html lang="pt-BR" className={`${inter.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col bg-superficie-sutil text-texto">
         <NavbarWrapper />
         <div className="flex-1">{children}</div>
       </body>

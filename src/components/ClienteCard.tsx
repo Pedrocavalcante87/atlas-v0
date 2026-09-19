@@ -6,6 +6,7 @@ import { ClienteAgrupado } from '@/types';
 import { registrarEnvio } from '@/actions';
 import { formatarMoeda } from '@/lib/format';
 import TituloCard from './TituloCard';
+import { BotaoLink } from './ui/Botao';
 
 interface Props {
   grupo: ClienteAgrupado;
@@ -28,16 +29,15 @@ export default function ClienteCard({ grupo }: Props) {
   const [erro, setErro] = useState('');
   const { cliente, titulos, valorTotal, categoriaMaisUrgente, mensagemConsolidada } = grupo;
 
-  // categoriaMaisUrgente já vem calculada por agruparPorCliente() com a mesma
-  // regra de corte de lib/prioridade.ts::categorizarTitulo — reaproveitar em
-  // vez de recomputar a partir de diasAtrasoMax evita duas fontes da mesma
-  // decisão divergirem se o corte mudar (ver ARCHITECTURE.md §6).
-  const corFaixa =
+  // Faixa vertical na borda esquerda em vez de barra colorida no topo: marca a
+  // urgência sem gastar altura, o que importa numa fila que pode ter centenas
+  // de cards. categoriaMaisUrgente já vem calculada por agruparPorCliente().
+  const faixa =
     categoriaMaisUrgente === 'atraso_longo'
-      ? 'bg-red-500'
+      ? 'before:bg-risco-500'
       : categoriaMaisUrgente === 'atraso_leve'
-      ? 'bg-amber-500'
-      : 'bg-blue-500';
+      ? 'before:bg-atencao-500'
+      : 'before:bg-borda-forte';
 
   async function handleEnviar() {
     setEnviando(true);
@@ -76,55 +76,65 @@ export default function ClienteCard({ grupo }: Props) {
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-      <div className={`h-1 ${corFaixa}`} />
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-3 mb-3">
+    <article
+      className={`relative bg-superficie border border-borda rounded-lg overflow-hidden
+                  before:absolute before:left-0 before:top-0 before:bottom-0 before:w-0.75 ${faixa}`}
+    >
+      <div className="pl-5 pr-4 py-4">
+        <div className="flex items-start justify-between gap-4 mb-3">
           <div className="min-w-0">
             <Link
               href={`/clientes/${cliente.id}`}
-              className="font-bold text-slate-900 hover:text-blue-600 transition-colors truncate block"
+              className="text-[15px] font-medium text-texto hover:text-marca-700 transition-colors truncate block"
             >
               {cliente.nome}
             </Link>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">{cliente.telefone}</p>
+            <p className="text-[13px] text-texto-suave mt-0.5 numero">{cliente.telefone}</p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-lg font-bold text-slate-900">{formatarMoeda(valorTotal)}</p>
-            <p className="text-xs text-slate-400">
+            <p className="text-[17px] font-semibold text-texto numero leading-none">
+              {formatarMoeda(valorTotal)}
+            </p>
+            <p className="text-[13px] text-texto-suave mt-1">
               {titulos.length} {titulos.length !== 1 ? 'títulos' : 'título'}
             </p>
           </div>
         </div>
 
-        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 mb-3">
-          <p className="text-sm text-slate-600 leading-relaxed">{mensagemConsolidada}</p>
-        </div>
+        {/* A mensagem é o produto: é o que o usuário vai enviar. Fundo sutil e
+            borda esquerda de citação, para ler como texto e não como campo. */}
+        <p className="text-[13px] text-texto-suave leading-relaxed border-l-2 border-borda pl-3 mb-3">
+          {mensagemConsolidada}
+        </p>
 
-        <a
+        <BotaoLink
           href={linkWhatsApp(cliente.telefone, mensagemConsolidada)}
           target="_blank"
           rel="noopener noreferrer"
           onClick={handleEnviar}
-          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm mb-3"
+          variante={enviado ? 'secundario' : 'primario'}
+          tamanho="md"
+          largura
         >
-          📱 {enviando ? 'Registrando envio...' : enviado ? 'Enviado — clique pra reenviar' : 'Enviar via WhatsApp'}
-        </a>
+          {enviando ? 'Registrando envio…' : enviado ? 'Enviado — clique para reenviar' : 'Enviar via WhatsApp'}
+        </BotaoLink>
 
-        {/* Mesmo padrão de aviso do TituloCard: falha de gravação não pode
-            passar como sucesso. Aqui é especialmente importante porque o
-            WhatsApp já abriu — a cobrança foi feita, só o registro dela é que
-            não existe, e quem olhar o histórico depois não vai saber disso. */}
+        {/* Falha de gravação não pode passar como sucesso. Aqui é especialmente
+            importante porque o WhatsApp já abriu — a cobrança foi feita, só o
+            registro dela é que não existe, e quem olhar o histórico depois não
+            vai saber disso. */}
         {erro && (
-          <p className="text-xs text-red-600 -mt-1 mb-3 font-medium">⚠ {erro}</p>
+          <p role="alert" className="text-[13px] text-risco-600 mt-2">
+            {erro}
+          </p>
         )}
 
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 mt-3">
           {titulos.map((t) => (
             <TituloCard key={t.id} titulo={t} />
           ))}
         </div>
       </div>
-    </div>
+    </article>
   );
 }

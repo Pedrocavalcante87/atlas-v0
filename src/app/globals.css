@@ -1,20 +1,129 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f1f5f9;
-  --foreground: #0f172a;
+/* ===========================================================================
+   Atlas — sistema visual
+   ---------------------------------------------------------------------------
+   Linguagem: enterprise minimalista. Superfície branca, hierarquia por
+   tipografia e espaçamento, separação por borda de 1px em vez de sombra,
+   raios curtos. Nada aqui é decorativo: cada token tem um papel.
+
+   COMO USAR: prefira sempre o token semântico (`bg-superficie`, `text-risco`)
+   ao valor literal (`bg-white`, `text-red-600`). É isso que permite mudar a
+   identidade, adicionar tema escuro ou introduzir um segundo domínio sem
+   caçar classe por classe em 15 arquivos.
+
+   SOBRE O VERDE SER A MARCA E TAMBÉM SIGNIFICAR "PAGO": é deliberado, não
+   colisão. O Atlas existe para recuperar dinheiro — a marca e o sucesso são a
+   mesma ideia. O contexto desambigua: badge verde num título = pago; botão
+   verde = ação primária.
+   =========================================================================== */
+
+@theme {
+  /* --- Marca -------------------------------------------------------------
+     Verde profundo, dessaturado. Longe do verde-WhatsApp e do verde-neon:
+     em produto financeiro a cor precisa sustentar leitura longa e parecer
+     sóbria ao lado de números. */
+  --color-marca-50:  #f1f7f4;
+  --color-marca-100: #dcebe4;
+  --color-marca-200: #bbd8ca;
+  --color-marca-300: #8fbda8;
+  --color-marca-400: #5c9b81;
+  --color-marca-500: #3a7f64;
+  --color-marca-600: #2b6650;
+  --color-marca-700: #235242;
+  --color-marca-800: #1e4237;
+  --color-marca-900: #1a372f;
+  --color-marca-950: #0d1f1a;
+
+  /* --- Neutros -----------------------------------------------------------
+     Cinzas quase puros, com um toque mínimo de verde para não brigar com a
+     marca. Slate (azulado) deixaria o verde sujo. */
+  --color-tinta-50:  #f7f8f7;
+  --color-tinta-100: #eef0ef;
+  --color-tinta-200: #dfe2e0;
+  --color-tinta-300: #c3c8c5;
+  --color-tinta-400: #9aa19d;
+  --color-tinta-500: #767d79;
+  --color-tinta-600: #5d635f;
+  --color-tinta-700: #4a4f4c;
+  --color-tinta-800: #333735;
+  --color-tinta-900: #1f2221;
+  --color-tinta-950: #121413;
+
+  /* --- Semânticos de domínio --------------------------------------------
+     Esta é a gramática que o usuário lê ANTES do texto. Não trocar por
+     estética: a fila inteira é interpretada por estas três cores.
+       risco    = vencido, cobrar hoje
+       atencao  = vence em breve, preventivo
+       marca    = pago / dinheiro recuperado
+     Tons dessaturados de propósito — vermelho vivo numa lista inteira de
+     inadimplentes vira ruído e para de significar urgência. */
+  --color-risco-50:  #fdf3f2;
+  --color-risco-100: #fbe3e1;
+  --color-risco-200: #f6cbc7;
+  --color-risco-500: #c2544a;
+  --color-risco-600: #a8433a;
+  --color-risco-700: #8b362f;
+
+  --color-atencao-50:  #fdf7ed;
+  --color-atencao-100: #f9ebd2;
+  --color-atencao-200: #f2d9ab;
+  --color-atencao-500: #b8863a;
+  --color-atencao-600: #9c6f2c;
+  --color-atencao-700: #7e5824;
+
+  /* --- Papéis de superfície ---------------------------------------------
+     Nomeados pelo papel, não pela cor. Um tema escuro futuro redefine só
+     estes seis valores. */
+  --color-superficie:         #ffffff;
+  --color-superficie-sutil:   #f7f8f7;
+  --color-superficie-afundada: #eef0ef;
+  --color-borda:              #dfe2e0;
+  --color-borda-forte:        #c3c8c5;
+  --color-texto:              #1f2221;
+  --color-texto-suave:        #5d635f;
+  --color-texto-fraco:        #9aa19d;
+
+  /* --- Raios -------------------------------------------------------------
+     Curtos. Cartão de 16px arredondado lê como app de consumo; este produto
+     mostra dinheiro devido. */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+
+  /* --- Elevação ----------------------------------------------------------
+     Uma sombra só, quase imperceptível, reservada a coisas que flutuam de
+     verdade (menu, popover). Superfície comum separa por BORDA. */
+  --shadow-flutuante: 0 4px 16px -4px rgb(18 20 19 / 0.12), 0 1px 3px rgb(18 20 19 / 0.06);
+
+  /* --- Tipografia --------------------------------------------------------- */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-numeros), ui-monospace, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* ---------------------------------------------------------------------------
+   Base
+   --------------------------------------------------------------------------- */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  background: var(--color-superficie-sutil);
+  color: var(--color-texto);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Todo número de dinheiro usa largura de dígito fixa. Sem isso, uma coluna de
+   valores "dança" a cada render e fica impossível comparar de relance — o que
+   é literalmente a tarefa do usuário na lista do dia. */
+.numero {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Foco visível e consistente. Acessibilidade não é opcional num produto que
+   alguém opera o dia inteiro no teclado. */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--color-marca-500);
+  outline-offset: 2px;
 }
