@@ -196,7 +196,7 @@ novo.
 | Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
 | Parse de CSV | PapaParse | ^5.5.4 |
 | Lint | ESLint | ^9, `eslint-config-next` |
-| Testes | Vitest | ^4 — 143 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
+| Testes | Vitest | ^4 — 168 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
 
 ### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
 
@@ -216,13 +216,14 @@ npm run dev     # servidor de desenvolvimento (localhost:3000)
 npm run build   # build de produção
 npm run start   # serve o build de produção
 npm run lint    # ESLint
-npm run test    # vitest — 143 casos, todos em src/lib/
+npm run test    # vitest — 168 casos, todos em src/lib/
 ```
 
-**O que tem cobertura** (`src/lib/*.test.ts`, 143 casos): `prioridade.ts` (score, categorização,
+**O que tem cobertura** (`src/lib/*.test.ts`, 168 casos): `prioridade.ts` (score, categorização,
 reentrada), `csv-import.ts` (parsing, validação, planejamento do lote, deduplicação),
-`recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor) e
-`importacao.ts` (máquina de estados de conflito).
+`recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor),
+`importacao.ts` (máquina de estados de conflito) e `sessao.ts` (assinatura, expiração e recusa de
+cookie forjado).
 
 **O que NÃO tem cobertura, e precisa de verificação manual**: rotas de API, Server Actions,
 componentes React, o encadeamento HTTP entre UI e backend, comportamento sob dependência
@@ -249,6 +250,7 @@ src/
 │   ├── recuperacao.ts  # misto: apuração pura + uma leitura
 │   ├── supabase-io.ts  # POLÍTICA de I/O: prazo, classificação de falha, paginação
 │   ├── supabase.ts     # client Supabase (service_role, servidor-only)
+│   ├── sessao.ts       # domínio puro: assina/valida o cookie de sessão (HMAC + expiração)
 │   └── *.test.ts       # vitest (npm run test)
 ├── actions/          # Server Actions ('use server')
 ├── types/            # tipos TS compartilhados
@@ -374,6 +376,7 @@ Cada um está garantido por mecanismo, não por disciplina de quem escreve o có
 | Falha de infraestrutura nunca é apresentada como erro do dado do usuário | `ehFalhaDeInfraestrutura` + `resultado: 'indisponivel'` |
 | Nenhuma requisição fica pendurada indefinidamente | Prazos de 8s/15s em `supabase-io.ts` |
 | `service_role` nunca chega ao navegador | Só `lib/supabase.ts` a lê; nenhum Client Component o importa |
+| Sessão só vale se este servidor a emitiu, e só até expirar | `lib/sessao.ts`: HMAC-SHA256 com chave derivada de `APP_PASSWORD`, expiração dentro da carga assinada |
 
 ## Leitura de listas — o PostgREST corta em 1000 linhas
 
@@ -514,6 +517,19 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   validador junto, senão a confirmação passa a rejeitar dados legítimos.
 - `DELETE /api/dados?modo=tudo` exige `{ confirmacao: "EXCLUIR TUDO" }` no corpo, além da senha do
   app — a UI já envia isso automaticamente no segundo clique de confirmação.
+- **O cookie de sessão é assinado (`lib/sessao.ts`) — não reintroduza um valor constante.** Ele já
+  foi a string literal `'1'`, e o gate aceitava qualquer requisição que a trouxesse: `curl -H
+  'Cookie: atlas_auth=1'` entrava sem ver a senha, em toda rota, inclusive na exclusão total. Hoje o
+  valor é `v1.<expiraEm>.<HMAC>`, com chave derivada de `APP_PASSWORD` e expiração **dentro da carga
+  assinada** — `maxAge` é instrução ao navegador, não garantia. Quem valida é `sessaoValida` em
+  `src/proxy.ts`. Consequência operacional: trocar `APP_PASSWORD` desloga todo mundo (desejável).
+- **O Proxy do Next 16 roda em runtime Node.js** e definir `runtime` nele lança erro (confirmado em
+  `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md` §Runtime). Por
+  isso `lib/sessao.ts` pode usar `node:crypto` direto. Se algum dia o Proxy voltar ao Edge, essa
+  importação quebra e o caminho é Web Crypto (`crypto.subtle`, assíncrono).
+- **Server Actions não checam autenticação sozinhas** — dependem do matcher do Proxy, e a doc do
+  Next 16 avisa que mudar o matcher ou mover a ação de rota remove a proteção em silêncio (ver
+  ARCHITECTURE.md §9). Ao tocar `actions/index.ts`, considere validar a sessão no topo da ação.
 - Comparação de senha em `api/login/route.ts` usa `crypto.timingSafeEqual` (constant-time).
 - Login tem rate limiting em memória (10 tentativas / 5 min / IP) — não sobrevive a restart nem é
   compartilhado entre instâncias; ok para o deploy de instância única atual, revisar se isso mudar.

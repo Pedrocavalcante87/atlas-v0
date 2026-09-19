@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
+import { criarValorDeSessao, DURACAO_SESSAO_MS } from '@/lib/sessao';
 
 // ---------------------------------------------------------------------------
 // Rate limiting em memória por IP — suficiente para dificultar força bruta
@@ -66,12 +67,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Senha incorreta.' }, { status: 401 });
   }
 
+  // Valor assinado, não a string '1': `maxAge` é só uma instrução ao navegador,
+  // então a validade real viaja dentro do valor e é verificada em src/proxy.ts
+  // (ver lib/sessao.ts). Os dois prazos saem da mesma constante para não
+  // divergirem — um cookie que o navegador guarda além da validade da sessão
+  // vira um "logado" que o servidor recusa, sem explicação para o usuário.
   const response = NextResponse.json({ ok: true });
-  response.cookies.set('atlas_auth', '1', {
+  response.cookies.set('atlas_auth', criarValorDeSessao(appPassword), {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
-    maxAge: 60 * 60 * 24 * 30, // 30 dias
+    maxAge: DURACAO_SESSAO_MS / 1000,
     path: '/',
   });
   return response;

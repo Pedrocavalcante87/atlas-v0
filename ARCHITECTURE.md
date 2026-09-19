@@ -41,7 +41,7 @@ um repositório; ela impede que cada ponto de chamada invente o próprio tratame
 
 | Módulo | Arquivos | Responsabilidade |
 |---|---|---|
-| **Autenticação** | `src/proxy.ts`, `src/app/api/login/route.ts`, `src/app/login/page.tsx` | Gate por senha única (env var) + cookie httpOnly de 30 dias + rate limiting em memória |
+| **Autenticação** | `src/proxy.ts`, `src/app/api/login/route.ts`, `src/app/login/page.tsx`, `src/lib/sessao.ts` | Gate por senha única (env var) + cookie httpOnly **assinado (HMAC-SHA256)** de 30 dias + rate limiting em memória |
 | **Ingestão de CSV** | `src/app/api/upload-csv/route.ts`, `src/app/api/upload-csv/confirmar/route.ts`, `src/lib/csv-import.ts`, `src/app/upload/page.tsx` | Parse, normalização, validação (prévia e confirmação), dedup e gravação de títulos importados |
 | **Domínio de priorização** | `src/lib/prioridade.ts`, `src/lib/templates.ts`, `src/types/index.ts` | Cálculo de urgência/score, agrupamento por cliente, geração de mensagens |
 | **Formatação de exibição** | `src/lib/format.ts` | `formatarMoeda`, reaproveitado por todas as telas |
@@ -71,7 +71,7 @@ está fora", e paginação. Existe porque a alternativa (repetir `if (error)` em
 justamente o que falhou: `?? 0` espalhado por `/api/dados` transformava apagão em R$ 0,00.
 
 **Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`,
-`supabase-io.test.ts`, `importacao.test.ts`. `lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
+`supabase-io.test.ts`, `importacao.test.ts`, `sessao.test.ts`. `lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
 Server Action ou componente React tem cobertura — a verificação deles é manual (`npm run dev`) ou
 via E2E ad-hoc.
 
@@ -389,6 +389,21 @@ deles.
 
 ### Já corrigido (acumulado)
 
+- **O cookie de sessão era a string literal `1`, e o gate o aceitava como prova de
+  autenticação.** `src/proxy.ts` comparava `request.cookies.get('atlas_auth')?.value === '1'`, e
+  `api/login` gravava exatamente esse valor. Como o cookie não era assinado nem vinculado à senha,
+  **qualquer requisição com `Cookie: atlas_auth=1` entrava sem nunca ver `APP_PASSWORD`** — inclusive
+  `GET /api/dados` (nome, telefone e valores de todos os clientes) e `DELETE /api/dados?modo=tudo`,
+  cuja frase de confirmação está no código versionado. A comparação constant-time da senha e o rate
+  limiting protegiam uma porta que ninguém precisava atravessar. Não estava registrado em lugar
+  nenhum: o README afirmava que "um cookie seguro é salvo por 30 dias".
+  **Corrigido em `src/lib/sessao.ts`**: o valor passou a ser `v1.<expiraEm>.<HMAC-SHA256>`, com a
+  chave derivada de `APP_PASSWORD` (sem env var nova — uma variável obrigatória a mais quebraria
+  todo deploy existente) e a expiração **dentro da carga assinada**, porque o `maxAge` do cookie é
+  só uma instrução ao navegador e quem monta a requisição à mão não a obedece. Verificado de ponta a
+  ponta contra o servidor: cookie `=1`, assinatura adulterada e validade esticada recebem 307 para
+  `/login`; o cookie legítimo atravessa. Efeito colateral deliberado: trocar `APP_PASSWORD` encerra
+  todas as sessões em curso.
 - **`lib/supabase.ts` usava a chave ANÔNIMA (`NEXT_PUBLIC_SUPABASE_ANON_KEY`), não a
   `service_role`, desde o commit inicial do projeto** — apesar de `supabase/rls.sql` e o restante
   da documentação sempre terem descrito o modelo de segurança como "RLS habilitado sem políticas +
@@ -417,6 +432,17 @@ deles.
 
 ### Ainda válidas / não endereçadas
 
+- **As Server Actions não verificam autenticação por conta própria** — dependem inteiramente do
+  gate em `src/proxy.ts`. Hoje isso funciona (o matcher cobre `/`, de onde `registrarEnvio` e
+  `atualizarStatusTitulo` são chamadas), mas a documentação do Next 16 avisa que a cobertura é
+  frágil por construção: *"Server Functions are not separate routes in this chain. They are handled
+  as POST requests to the route where they are used, so a Proxy matcher that excludes a path will
+  also skip Server Function calls on that path. […] Always verify authentication and authorization
+  inside each Server Function rather than relying on Proxy alone"*
+  (`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`). Ou seja:
+  mudar o `matcher` ou mover uma ação para outra rota pode remover a proteção **em silêncio**, sem
+  erro de compilação e sem teste que pegue. Não endereçado — a correção é uma checagem de sessão no
+  topo de cada Server Action, e vale fazer junto da próxima mudança que toque `actions/index.ts`.
 - **`telefone` é a chave única de upsert de cliente** (`onConflict: 'telefone'`) — dois clientes
   reais com o mesmo número (erro de digitação, número corporativo compartilhado) se fundem
   silenciosamente sob o mesmo registro. Resolver isso é uma decisão de produto (permitir telefone
@@ -436,10 +462,11 @@ deles.
 
 - Sem camada de repositório: mudar um nome de coluna ou tabela exige busca manual em todos os
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
-- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **143 casos**, todos
+- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **168 casos**, todos
   em `src/lib/`. Cobrem score e categorização (`prioridade`), parsing e planejamento do lote
   (`csv-import`), apuração (`recuperacao`), classificação de falha e paginação por cursor
-  (`supabase-io`) e a máquina de estados de conflito (`importacao`).
+  (`supabase-io`), a máquina de estados de conflito (`importacao`) e a assinatura/expiração do
+  cookie de sessão (`sessao`).
   **O que continua sem cobertura**: Server Actions, as rotas de API como integração, componentes
   React, o encadeamento HTTP entre UI e backend, o comportamento sob dependência indisponível e a
   concorrência real contra o Postgres. Esses seguem provados apenas por reprodução manual.

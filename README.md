@@ -48,7 +48,9 @@ Login → Importar CSV → Ver Lista do Dia → Enviar WhatsApp → Registrar re
 
 ### 1. Login (`/login`)
 
-Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor via variável de ambiente (`APP_PASSWORD`). Após o login, um cookie seguro é salvo por 30 dias — o usuário não precisa digitar a senha novamente nesse período.
+Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor via variável de ambiente (`APP_PASSWORD`). Após o login, um cookie de sessão **assinado pelo servidor** é salvo por 30 dias — o usuário não precisa digitar a senha novamente nesse período.
+
+O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura que só o servidor consegue produzir (a chave é derivada de `APP_PASSWORD`). Um cookie inventado, alterado ou com a validade esticada é recusado e cai no login. Trocar `APP_PASSWORD` encerra todas as sessões abertas.
 
 > **Para testadores:** em desenvolvimento local sem senha configurada, o login é ignorado e você entra direto. Em produção sem senha configurada o app responde 503 em vez de liberar o acesso.
 
@@ -325,8 +327,8 @@ uma cobrança nova.
 | Linguagem | TypeScript |
 | Banco de dados | Supabase (PostgreSQL) |
 | Parse de CSV | PapaParse |
-| Autenticação | Cookie HTTP-only + middleware |
-| Testes | Vitest (143 casos, domínio e política de I/O) |
+| Autenticação | Cookie HTTP-only assinado (HMAC) + proxy |
+| Testes | Vitest (168 casos, domínio, política de I/O e sessão) |
 
 ---
 
