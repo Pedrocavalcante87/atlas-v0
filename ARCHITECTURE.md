@@ -438,17 +438,19 @@ deles.
 
 ### Ainda válidas / não endereçadas
 
-- **As Server Actions não verificam autenticação por conta própria** — dependem inteiramente do
-  gate em `src/proxy.ts`. Hoje isso funciona (o matcher cobre `/`, de onde `registrarEnvio` e
-  `atualizarStatusTitulo` são chamadas), mas a documentação do Next 16 avisa que a cobertura é
-  frágil por construção: *"Server Functions are not separate routes in this chain. They are handled
-  as POST requests to the route where they are used, so a Proxy matcher that excludes a path will
-  also skip Server Function calls on that path. […] Always verify authentication and authorization
-  inside each Server Function rather than relying on Proxy alone"*
-  (`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`). Ou seja:
-  mudar o `matcher` ou mover uma ação para outra rota pode remover a proteção **em silêncio**, sem
-  erro de compilação e sem teste que pegue. Não endereçado — a correção é uma checagem de sessão no
-  topo de cada Server Action, e vale fazer junto da próxima mudança que toque `actions/index.ts`.
+- ~~As Server Actions não verificam autenticação por conta própria~~ — **resolvido**: `registrarEnvio`
+  e `atualizarStatusTitulo` chamam `exigirSessao()` antes de qualquer I/O, revalidando o cookie
+  assinado com a mesma `lib/sessao.ts` que o proxy usa. Não é redundância: uma Server Action não é
+  rota própria — chega como POST na rota onde é usada, então a cobertura dependia inteiramente do
+  `matcher` do Proxy, e mudá-lo (ou mover um componente de rota) removeria a proteção **em
+  silêncio**. A documentação do Next 16 manda explicitamente fazer essa checagem: *"A page-level
+  authentication check does not extend to the Server Actions defined within it. Always re-verify
+  inside the action"* e *"treat Server Actions as reachable via direct POST requests and verify
+  authentication and authorization inside each one"*
+  (`node_modules/next/dist/docs/01-app/02-guides/data-security.md`).
+  **O que ainda NÃO existe é autorização por recurso**: qualquer sessão válida pode agir sobre
+  qualquer título, porque o Atlas é mono-empresa e não há noção de dono. Se multi-tenancy entrar
+  (§5.7 do PLANEJAMENTO.md), `exigirSessao` precisa virar "esta sessão pode tocar ESTE título".
 - **`telefone` é a chave única de upsert de cliente** (`onConflict: 'telefone'`) — dois clientes
   reais com o mesmo número (erro de digitação, número corporativo compartilhado) se fundem
   silenciosamente sob o mesmo registro. Resolver isso é uma decisão de produto (permitir telefone
