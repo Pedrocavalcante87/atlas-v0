@@ -196,7 +196,7 @@ novo.
 | Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
 | Parse de CSV | PapaParse | ^5.5.4 |
 | Lint | ESLint | ^9, `eslint-config-next` |
-| Testes | Vitest | ^4 — 193 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
+| Testes | Vitest | ^4 — 202 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
 
 ### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
 
@@ -216,14 +216,15 @@ npm run dev     # servidor de desenvolvimento (localhost:3000)
 npm run build   # build de produção
 npm run start   # serve o build de produção
 npm run lint    # ESLint
-npm run test    # vitest — 193 casos, todos em src/lib/
+npm run test    # vitest — 202 casos, todos em src/lib/
 ```
 
-**O que tem cobertura** (`src/lib/*.test.ts`, 193 casos): `prioridade.ts` (score, categorização,
+**O que tem cobertura** (`src/lib/*.test.ts`, 202 casos): `prioridade.ts` (score, categorização,
 reentrada), `csv-import.ts` (parsing, validação, planejamento do lote, deduplicação),
 `recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor),
 `importacao.ts` (máquina de estados de conflito), `sessao.ts` (assinatura, expiração e recusa de
-cookie forjado) e `rate-limit.ts` (janela, reinício e expurgo de entradas velhas).
+cookie forjado), `rate-limit.ts` (janela, reinício e expurgo de entradas velhas) e `credenciais.ts`
+(normalização de e-mail e derivação do segredo de sessão).
 
 **O que NÃO tem cobertura, e precisa de verificação manual**: rotas de API, Server Actions,
 componentes React, o encadeamento HTTP entre UI e backend, comportamento sob dependência
@@ -241,6 +242,10 @@ admitir a lacuna.
 src/
 ├── app/             # rotas (App Router) + API routes em app/api/*/route.ts
 ├── components/       # componentes de UI ('use client' onde há interação)
+│   ├── ui/             # primitivas (Botao, BotaoIcone, Badge, Icone, KpiCard)
+│   ├── FilaCobranca.tsx  # a fila do dia como tabela
+│   ├── ClienteLinha.tsx  # uma linha = um cliente; expande para os títulos
+│   └── Marca.tsx       # símbolo + wordmark
 ├── lib/
 │   ├── prioridade.ts   # domínio puro: urgência, score, fila do dia, agrupamento
 │   ├── templates.ts    # domínio puro: texto das mensagens
@@ -251,6 +256,7 @@ src/
 │   ├── supabase-io.ts  # POLÍTICA de I/O: prazo, classificação de falha, paginação
 │   ├── supabase.ts     # client Supabase (service_role, servidor-only)
 │   ├── sessao.ts       # domínio puro: assina/valida o cookie de sessão (HMAC + expiração)
+│   ├── credenciais.ts  # e-mail + senha do ambiente e o segredo derivado das duas
 │   ├── rate-limit.ts   # domínio puro: janela de tentativas por chave, com expurgo
 │   └── *.test.ts       # vitest (npm run test)
 ├── actions/          # Server Actions ('use server')
@@ -286,9 +292,38 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
   usam Server Actions (`actions/index.ts`); importação de CSV e limpeza de dados usam API routes
   chamadas via `fetch` no client. Registrado como inconsistência real em ARCHITECTURE.md §8 — não
   tente unificar sem que a tarefa peça isso.
-- **Tailwind inline, sem CSS modules/styled-components.** Paleta: `slate` (neutro), `red`
-  (vencido/urgente), `amber` (atenção/preventivo), `blue` (informativo/preventivo), `emerald`
-  (sucesso/pago). Cards em `rounded-xl`/`rounded-2xl`, `shadow-sm`, `border-slate-200`.
+- **Tailwind inline com TOKENS SEMÂNTICOS, nunca cor literal.** Use `bg-superficie`,
+  `border-borda`, `text-texto-suave`, `bg-marca-700` — **não** `bg-white`, `border-slate-200`,
+  `text-gray-500`. Os tokens vivem em `@theme` no `src/app/globals.css`; é o que permite mudar a
+  identidade, acrescentar tema escuro ou introduzir um segundo domínio editando um arquivo em vez
+  de caçar classe em quinze. A paleta `slate`/`blue`/`emerald` do Tailwind **saiu do código** —
+  reintroduzi-la quebra o sistema em silêncio, porque a cor continua funcionando e só a
+  consistência morre.
+- **A cor do domínio é gramática, não estética.** `risco` = vencido, `atencao` = vence em breve,
+  `marca` = pago/recuperado. O usuário lê a fila por cor antes de ler o texto. Os tons são
+  dessaturados de propósito: vermelho vivo numa lista inteira de inadimplentes vira ruído e para
+  de significar urgência. `Badge` + `tomDaCategoria` (`components/ui/Badge.tsx`) são a fonte única
+  da tradução categoria → cor.
+- **Verde é a marca E significa "pago" — não é colisão.** O Atlas existe para recuperar dinheiro,
+  então marca e sucesso são a mesma ideia; o contexto desambigua (badge verde = pago, botão verde
+  = ação primária). Não crie um segundo verde para "resolver" isso.
+- **Forma: raios curtos (2–8px), separação por borda de 1px, sem sombra.** Há uma sombra só
+  (`shadow-flutuante`), reservada ao que flutua de verdade. Cartão de 16px arredondado com sombra
+  lê como app de consumo; este produto mostra dinheiro devido.
+- **Tamanho de texto vem da escala, nunca de `text-[Npx]`.** Os degraus são nomeados por papel —
+  `text-micro`, `text-legenda`, `text-corpo`, `text-base`, `text-destaque`, `text-titulo`,
+  `text-cifra` — e cada um já traz altura de linha e espacejamento. Escrever `text-[13px]` de novo
+  desfaz o sistema em silêncio: funciona na tela e some da escala. (A primeira versão do sistema
+  fez exatamente isso; foi corrigido.) `text-xs`/`text-sm`/`text-lg`/`text-xl` do Tailwind também
+  saíram do código.
+- **Duas famílias, com papéis fixos:** Inter para texto e ações; **IBM Plex Mono para dinheiro e
+  identificadores** (telefone, documento), via classe `.numero`. Não use a mono como enfeite em
+  texto corrido — o contraste só significa alguma coisa enquanto ela marcar "isto é um número".
+- **Todo número de dinheiro leva a classe `.numero`** — ela aplica a mono e `tabular-nums`. Sem
+  largura de dígito fixa a coluna de valores muda de largura a cada render e fica impossível
+  comparar de relance, que é a tarefa do usuário na lista do dia.
+- **Botão e etiqueta vêm de `components/ui/`**, com variante por PAPEL (`primario`, `secundario`,
+  `sutil`, `perigo`), não por cor. Só um `primario` por bloco.
 - **`'use client'` só onde há estado/interação** (formulários, botões com handler). Páginas que só
   leem e renderizam são Server Components por padrão.
 
@@ -305,7 +340,7 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
 - **Categorização de urgência**: `> 7 dias` de atraso = `atraso_longo`; `1–7 dias` =
   `atraso_leve`; vence hoje até `+3 dias` = `preventivo`; vencimento `> 3 dias` no futuro **não
   aparece** na lista do dia. Fonte oficial e única: `lib/prioridade.ts::categorizarTitulo`,
-  reaproveitada por `api/upload-csv/route.ts`, `api/dados/route.ts` e `TituloCard.tsx` (que usa
+  reaproveitada por `api/upload-csv/route.ts`, `api/dados/route.ts` e `ClienteLinha.tsx` (que usa
   `titulo.categoria`, não recalcula). Coberto por teste.
 - **Exceção deliberada ao corte de urgência**: um título que reentra por promessa vencida ou fim
   do silêncio entra na fila **mesmo com vencimento distante** — o compromisso com o cliente vence
@@ -314,7 +349,7 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
   preventivos ordenam por vencimento mais próximo.
 - **Cobrança é por cliente, não por título**: um cliente com vários títulos em aberto recebe uma
   mensagem e um envio de WhatsApp consolidados (`lib/prioridade.ts::agruparPorCliente`,
-  `ClienteCard.tsx`). Cada título individual mantém seu próprio controle de status.
+  `ClienteLinha.tsx`). Cada título individual mantém seu próprio controle de status, na expansão da linha.
 - **`telefone` é a chave de upsert de cliente** (`onConflict: 'telefone'` em
   `upload-csv/confirmar/route.ts`). Dois clientes reais com o mesmo número se fundem
   silenciosamente sob o mesmo registro — comportamento atual, não validado contra esse caso.
@@ -395,7 +430,7 @@ Cada um está garantido por mecanismo, não por disciplina de quem escreve o có
 | Falha de infraestrutura nunca é apresentada como erro do dado do usuário | `ehFalhaDeInfraestrutura` + `resultado: 'indisponivel'` |
 | Nenhuma requisição fica pendurada indefinidamente | Prazos de 8s/15s em `supabase-io.ts` |
 | `service_role` nunca chega ao navegador | Só `lib/supabase.ts` a lê; nenhum Client Component o importa |
-| Sessão só vale se este servidor a emitiu, e só até expirar | `lib/sessao.ts`: HMAC-SHA256 com chave derivada de `APP_PASSWORD`, expiração dentro da carga assinada |
+| Sessão só vale se este servidor a emitiu, e só até expirar | `lib/sessao.ts`: HMAC-SHA256 com chave derivada de `APP_EMAIL` + `APP_PASSWORD`, expiração dentro da carga assinada |
 | Mutação de dado financeiro nunca roda sem sessão válida | `proxy.ts` (gate de rota) **e** `exigirSessao()` no topo de cada Server Action — duas camadas, porque Server Action não é rota própria |
 
 ## Leitura de listas — o PostgREST corta em 1000 linhas
@@ -537,6 +572,7 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   validador junto, senão a confirmação passa a rejeitar dados legítimos.
 - `DELETE /api/dados?modo=tudo` exige `{ confirmacao: "EXCLUIR TUDO" }` no corpo, além da senha do
   app — a UI já envia isso automaticamente no segundo clique de confirmação.
+- **O acesso é uma credencial única de DUAS partes (`APP_EMAIL` + `APP_PASSWORD`), não contas de usuário.** Não há tabela de usuários, cadastro nem trilha de "quem fez o quê" — duas pessoas com a mesma credencial são indistinguíveis. Multi-usuário de verdade é reescrita do modelo de segurança (PLANEJAMENTO.md §5.7), não incremento. O segredo que assina a sessão deriva das duas partes, então trocar qualquer uma encerra as sessões abertas.
 - **O cookie de sessão é assinado (`lib/sessao.ts`) — não reintroduza um valor constante.** Ele já
   foi a string literal `'1'`, e o gate aceitava qualquer requisição que a trouxesse: `curl -H
   'Cookie: atlas_auth=1'` entrava sem ver a senha, em toda rota, inclusive na exclusão total. Hoje o
@@ -562,7 +598,7 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   antes só saíam se o mesmo IP voltasse, então o mapa crescia sem teto.
 - **Falha de Server Action precisa ser tratada por quem chama.** `registrarEnvio` e
   `atualizarStatusTitulo` lançam de propósito (o histórico é a única prova de que a cobrança
-  aconteceu). `ClienteCard` não capturava, e o resultado era o pior dos dois mundos: o WhatsApp
+  aconteceu). O componente de lista não capturava, e o resultado era o pior dos dois mundos: o WhatsApp
   abria, o botão travava em "Registrando envio..." e o registro não existia. Ao chamar uma Server
   Action de um componente, trate a rejeição e mostre o que falhou — em lote, com
   `Promise.allSettled`, para saber **quantos** falharam.

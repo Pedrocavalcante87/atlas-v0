@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { gravar, ler } from '@/lib/supabase-io';
 import { calcularSilenciadoAte } from '@/lib/prioridade';
 import { sessaoValida } from '@/lib/sessao';
+import { credenciaisDoAmbiente, segredoDeSessao } from '@/lib/credenciais';
 import { StatusTitulo } from '@/types';
 
 /**
@@ -32,17 +33,17 @@ import { StatusTitulo } from '@/types';
  * e os botões não funcionam, sem explicação.
  */
 async function exigirSessao(): Promise<void> {
-  const appPassword = process.env.APP_PASSWORD;
+  const credenciais = credenciaisDoAmbiente();
 
-  if (!appPassword) {
+  if (!credenciais) {
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('Atlas não está configurado: defina APP_PASSWORD.');
+      throw new Error('Atlas não está configurado: defina APP_EMAIL e APP_PASSWORD.');
     }
     return;
   }
 
   const cookie = (await cookies()).get('atlas_auth')?.value;
-  if (!sessaoValida(appPassword, cookie)) {
+  if (!sessaoValida(segredoDeSessao(credenciais), cookie)) {
     throw new Error('Sua sessão expirou. Entre de novo para continuar.');
   }
 }

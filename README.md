@@ -1,7 +1,44 @@
-# Atlas v0 — Painel de Cobrança
+# Atlas — Painel de Cobrança
 
-> Guia completo do projeto: o que é, como funciona e como usar.  
-> Este documento é destinado tanto ao **desenvolvedor** quanto ao **testador**.
+> Uma planilha de títulos em aberto entra. A resposta de **quem cobrar hoje, e o que mandar** sai.
+
+`Next.js 16 (App Router)` · `React 19` · `TypeScript` · `Tailwind CSS v4` · `Supabase/PostgreSQL` · `Vitest — 202 casos`
+
+---
+
+## Sobre este repositório
+
+Atlas é um produto **v0 completo de ponta a ponta**: login, importação de planilha com prévia e
+confirmação, fila priorizada, mensagem pronta, envio pelo WhatsApp, registro de resultado,
+histórico por cliente e painel de dados. Não é um protótipo de tela — as regras de negócio vivem
+em módulos testados, e as decisões difíceis estão documentadas junto do código que as aplica.
+
+O que este repositório tenta demonstrar, além de "funciona":
+
+- **Domínio separado de I/O.** Priorização, ciclo de vida do título, parsing de CSV e apuração de
+  receita são funções puras — por isso 202 testes rodam em ~2s sem banco, sem browser e sem mock
+  de framework.
+- **Modos de falha tratados como funcionalidade.** Banco fora do ar não vira "lista vazia"; valor
+  ambíguo na planilha não vira cobrança errada; ausência de senha em produção não vira app aberto.
+- **Decisões registradas, não só implementadas.** Cada escolha não-óbvia tem o porquê escrito no
+  arquivo onde ela mora, e o desenho geral está em [ARCHITECTURE.md](ARCHITECTURE.md) e
+  [PLANEJAMENTO.md](PLANEJAMENTO.md).
+
+**Estado atual:** funcional e rodável localmente. Não há instância pública no ar — para ver o
+sistema funcionando, siga [Rodando localmente](#rodando-localmente) com um projeto Supabase seu
+(o plano gratuito basta). Para avaliar sem banco nenhum, veja
+[Como testar a aplicação](#como-testar-a-aplicação): a suíte automatizada, o lint, o typecheck e o
+build rodam sem nenhuma credencial.
+
+### Sumário
+
+| Se você quer… | Vá para |
+|---|---|
+| Entender o produto | [O que é o Atlas](#o-que-é-o-atlas) · [Telas e funcionalidades](#telas-e-funcionalidades) |
+| Entender as regras | [Priorização](#como-o-sistema-prioriza-os-títulos) · [Status dos títulos](#status-dos-títulos) |
+| Rodar na sua máquina | [Rodando localmente](#rodando-localmente) |
+| **Testar a aplicação** | [Como testar a aplicação](#como-testar-a-aplicação) |
+| Ver as decisões técnicas | [Decisões de engenharia](#decisões-de-engenharia) · [Estrutura de pastas](#estrutura-de-pastas) |
 
 ---
 
@@ -15,7 +52,7 @@ O Atlas faz tudo isso automaticamente:
 
 1. Você sobe uma planilha CSV, revisa uma prévia (nada é gravado ainda) e confirma a importação.
 2. O sistema calcula quem tem prioridade (baseado em dias de atraso e valor em risco).
-3. Exibe uma lista ordenada com a mensagem de cobrança já escrita para cada cliente.
+3. Exibe uma fila ordenada com a mensagem de cobrança já escrita para cada cliente.
 4. Com um clique você abre o WhatsApp com a mensagem pronta.
 5. Você registra o resultado (pago, prometeu, sem resposta). O título sai da lista — mas só sai
    **para sempre** se foi pago: promessa e sem resposta voltam sozinhas depois (ver
@@ -48,11 +85,15 @@ Login → Importar CSV → Ver Lista do Dia → Enviar WhatsApp → Registrar re
 
 ### 1. Login (`/login`)
 
-Tela de entrada protegida por senha. A senha é configurada pelo desenvolvedor via variável de ambiente (`APP_PASSWORD`). Após o login, um cookie de sessão **assinado pelo servidor** é salvo por 30 dias — o usuário não precisa digitar a senha novamente nesse período.
+Tela de entrada com **e-mail e senha**, configurados pelo desenvolvedor nas variáveis de ambiente `APP_EMAIL` e `APP_PASSWORD`. Após o login, um cookie de sessão **assinado pelo servidor** é salvo por 30 dias — não é preciso digitar de novo nesse período. O e-mail ignora maiúsculas e espaços; a senha não.
 
-O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura que só o servidor consegue produzir (a chave é derivada de `APP_PASSWORD`). Um cookie inventado, alterado ou com a validade esticada é recusado e cai no login. Trocar `APP_PASSWORD` encerra todas as sessões abertas.
+> **Importante:** isso é **uma credencial da empresa**, não contas de usuário. Não há cadastro, não há uma conta por pessoa, e o sistema não registra *quem* fez cada ação — só que foi feita. Todo mundo do negócio usa o mesmo e-mail e a mesma senha. Contas individuais exigiriam mudança estrutural (ver [PLANEJAMENTO.md](PLANEJAMENTO.md) §5.7).
 
-> **Para testadores:** em desenvolvimento local sem senha configurada, o login é ignorado e você entra direto. Em produção sem senha configurada o app responde 503 em vez de liberar o acesso.
+O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura que só o servidor consegue produzir (a chave deriva do e-mail **e** da senha). Um cookie inventado, alterado ou com a validade esticada é recusado e cai no login. Trocar o e-mail ou a senha encerra todas as sessões abertas.
+
+O login tem limite de **10 tentativas por IP a cada 5 minutos**; passando disso, a resposta é 429 até a janela expirar. A comparação de e-mail e senha é feita em tempo constante, e as duas sempre rodam — encerrar na primeira falha faria o tempo de resposta revelar que o e-mail estava certo.
+
+> **Para testadores:** em desenvolvimento local sem credencial configurada, o login é ignorado e você entra direto. Em produção sem credencial o app responde 503 em vez de liberar o acesso.
 
 ---
 
@@ -73,24 +114,24 @@ O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura 
 > aparecer "—", a apuração não pôde ser feita (normalmente falta rodar a migration do banco) —
 > o Atlas mostra um traço em vez de R$ 0,00 de propósito, porque zero seria uma afirmação falsa.
 
-**Seções da lista:**
+**Seções da fila:**
 
-- 🔴 **Vencidos — cobrar hoje**: Títulos já passados do vencimento, ordenados por prioridade (quem está há mais tempo com valor maior aparece primeiro).
-- 🟡 **A vencer — enviar lembrete**: Títulos que vencem hoje ou em até 3 dias, ordenados pelo mais próximo do vencimento.
+- **Vencidos — cobrar hoje**: títulos já passados do vencimento, ordenados por prioridade (quem está há mais tempo com valor maior aparece primeiro).
+- **A vencer — enviar lembrete**: títulos que vencem hoje ou em até 3 dias, ordenados pelo mais próximo do vencimento.
 
 > Títulos que vencem em mais de 3 dias **não aparecem** — o sistema só mostra o que é urgente.
 
-**Os cards são agrupados por cliente, não por título.** Se um cliente tem 3 títulos em aberto, ele aparece uma única vez na lista — cobrar a pessoa, não cada título isolado, evita mandar várias mensagens separadas pra mesma pessoa no mesmo dia.
+**A fila é uma tabela, com uma linha por cliente — não por título.** Se um cliente tem 3 títulos em aberto, ele aparece uma única vez na lista — cobrar a pessoa, não cada título isolado, evita mandar várias mensagens separadas pra mesma pessoa no mesmo dia.
 
-**Dentro de cada card de cliente:**
+**Cada linha mostra:** nome do cliente (clicável → histórico), telefone, valor total em aberto, maior atraso e quantidade de títulos. À direita ficam três ações padronizadas em ícone: **enviar pelo WhatsApp** (abre a conversa com a mensagem pronta e registra o envio), **ligar** (abre o discador) e **marcar como pago**.
 
-- Nome do cliente (clicável → abre o histórico) e telefone
-- Valor total em aberto e quantidade de títulos
+**Ao expandir a linha** (seta à esquerda) aparecem:
+
 - A **mensagem de cobrança consolidada**, gerada automaticamente (texto pronto para copiar ou enviar)
 - Botão **"Enviar via WhatsApp"** — abre o WhatsApp com a mensagem consolidada preenchida e registra o envio em todos os títulos em aberto daquele cliente
 - Uma lista compacta com cada título individual do cliente: valor, badge de dias em atraso/a vencer, e seus próprios botões de resultado — **Pago**, **Prometeu pagar**, **Sem resposta** — porque o cliente pode pagar um título e não outro
 
-Ao registrar um resultado, aquele título some da lista do dia. O card do cliente continua aparecendo enquanto ele tiver outros títulos pendentes.
+Ao registrar um resultado, aquele título some da lista do dia. A linha do cliente continua aparecendo enquanto ele tiver outros títulos pendentes.
 
 Se o resultado foi **prometeu pagar** ou **sem resposta**, o título não foi encerrado — ele volta à lista depois (na data prometida, ou passados alguns dias de silêncio) marcado com o motivo do retorno, para você saber que já falou com essa pessoa. Só **pago** encerra um título de vez.
 
@@ -122,14 +163,14 @@ No caso vermelho a tela informa quantos títulos chegaram a ser gravados antes d
 **reimportar o mesmo arquivo é seguro**: o que já entrou é reconhecido como duplicata e não entra
 duas vezes.
 
-**O sistema é inteligente no reconhecimento de colunas.** Ele aceita muitos nomes diferentes para cada campo — útil para planilhas exportadas de diferentes ERPs ou sistemas:
+**O sistema é flexível no reconhecimento de colunas.** Ele aceita muitos nomes diferentes para cada campo — útil para planilhas exportadas de diferentes ERPs ou sistemas. Colunas que ele não conhece (CPF, endereço, vendedor, observações) são simplesmente ignoradas.
 
 | Campo esperado | Exemplos de nomes aceitos |
 |---|---|
 | `nome` | nome, cliente, razao_social, devedor, sacado, pagador... |
 | `telefone` | telefone, celular, whatsapp, fone, tel, mobile... |
-| `valor` | valor, montante, vl_titulo, saldo, total, amount... |
-| `data_vencimento` | vencimento, due_date, dt_vencimento, prazo, venc... |
+| `valor` | valor, montante, vl_titulo, vl_total, saldo, total, amount... |
+| `data_vencimento` | vencimento, vencto, due_date, dt_vencimento, prazo, venc... |
 
 **Formatos aceitos para o valor:**
 
@@ -151,25 +192,30 @@ duas vezes.
 >
 > Isso é deliberado. Antes o sistema assumia decimal e gravava **R$ 1,50 no lugar de R$ 1.500**,
 > sem avisar. Uma cobrança recusada e visível é melhor que uma cobrança errada e silenciosa.
-> Decidir o formato automaticamente, olhando a coluna inteira, está planejado (`PLANEJAMENTO.md`
-> §5.3).
+> Decidir o formato automaticamente, olhando a coluna inteira, está planejado
+> ([PLANEJAMENTO.md](PLANEJAMENTO.md) §5.3).
 
 **Formatos aceitos para a data:**
 
 | Formato | Exemplo |
 |---|---|
-| DD/MM/AAAA | `15/08/2025` |
-| AAAA-MM-DD | `2025-08-15` |
-| DD-MM-AAAA | `15-08-2025` |
-| DD.MM.AAAA | `15.08.2025` |
-| AAAA/MM/DD | `2025/08/15` |
-| AAAAMMDD (compacto) | `20250815` |
+| DD/MM/AAAA | `15/08/2026` |
+| AAAA-MM-DD | `2026-08-15` |
+| DD-MM-AAAA | `15-08-2026` |
+| DD.MM.AAAA | `15.08.2026` |
+| AAAA/MM/DD | `2026/08/15` |
+| AAAAMMDD (compacto) | `20260815` |
 
 > ⚠️ **Data no formato americano (MM/DD/AAAA) não é aceita.** O dia vem primeiro. Uma linha como
 > `10/25/2026` é recusada com "data inválida", porque não existe mês 25. Mas atenção ao caso que o
 > sistema **não** consegue detectar: quando dia e mês são ambos 12 ou menos — `03/04/2026` — a
 > data entra como **3 de abril**, não 4 de março, sem nenhum aviso. Se a planilha veio de um
 > sistema em inglês, converta as datas antes de importar.
+
+**Outras regras de validação de linha:** nome não pode estar em branco; telefone precisa ter de 10
+a 15 dígitos depois de limpo (o DDI brasileiro é acrescentado quando falta); valor precisa ser
+positivo; e a data precisa cair dentro de uma faixa de 5 anos para trás ou para frente — data fora
+disso costuma ser coluna mapeada errada, não cobrança real.
 
 **Separadores aceitos:** vírgula (`,`), ponto e vírgula (`;`), tabulação (`tab`) e pipe (`|`).
 
@@ -179,8 +225,8 @@ duas vezes.
 
 ```csv
 nome,telefone,valor,data_vencimento
-João Silva,11999990000,1500.00,15/08/2025
-Maria Souza,21988880000,320,2025-08-20
+João Silva,11999990000,1500.00,15/08/2026
+Maria Souza,21988880000,320,2026-08-20
 ```
 
 ---
@@ -238,11 +284,11 @@ O algoritmo de prioridade funciona em duas etapas:
 
 **1. Categorização por urgência:**
 
-| Categoria | Condição | Cor no card |
+| Categoria | Condição | Cor |
 |---|---|---|
-| `atraso_longo` | Mais de 7 dias em atraso | Borda vermelha |
-| `atraso_leve` | 1 a 7 dias em atraso | Borda amarela |
-| `preventivo` | Vence hoje ou em até 3 dias | Borda azul |
+| `atraso_longo` | Mais de 7 dias em atraso | Vermelho (risco) |
+| `atraso_leve` | 1 a 7 dias em atraso | Âmbar (atenção) |
+| `preventivo` | Vence hoje ou em até 3 dias | Neutro |
 | *(não exibido)* | Vence em mais de 3 dias | — |
 
 **2. Ordenação dentro de cada grupo:**
@@ -340,22 +386,23 @@ uma cobrança nova.
 
 | Camada | Tecnologia |
 |---|---|
-| Framework | Next.js 16 (App Router) |
+| Framework | Next.js 16 (App Router, Server Components e Server Actions) |
 | UI | React 19 + Tailwind CSS v4 |
-| Linguagem | TypeScript |
-| Banco de dados | Supabase (PostgreSQL) |
+| Sistema visual | Tokens semânticos em `globals.css` (`superficie`, `risco`, `atencao`, `marca`) + primitivas próprias em `components/ui` |
+| Linguagem | TypeScript (modo estrito) |
+| Banco de dados | Supabase (PostgreSQL) com RLS habilitado, acessado só pelo servidor |
 | Parse de CSV | PapaParse |
-| Autenticação | Cookie HTTP-only assinado (HMAC) + proxy |
-| Testes | Vitest (193 casos, domínio, política de I/O e sessão) |
+| Autenticação | E-mail + senha (credencial única) · cookie HTTP-only assinado (HMAC-SHA256), verificado no Proxy |
+| Testes | Vitest — 202 casos em 8 arquivos: domínio, política de I/O e sessão |
 
 ---
 
-## Configuração para desenvolvedores
+## Rodando localmente
 
 ### 1. Pré-requisitos
 
-- Node.js 18+
-- Uma conta no [Supabase](https://supabase.com) (plano gratuito funciona)
+- **Node.js 20.9+** (exigência do Next.js 16)
+- Uma conta no [Supabase](https://supabase.com) — o plano gratuito é suficiente
 
 ### 2. Criar o banco de dados
 
@@ -392,7 +439,7 @@ Copie o arquivo de exemplo e preencha com os dados do seu projeto Supabase:
 cp .env.local.example .env.local
 ```
 
-São três variáveis, todas obrigatórias:
+São quatro variáveis, todas obrigatórias:
 
 ```env
 # Supabase → Settings > API > Project URL
@@ -404,17 +451,20 @@ NEXT_PUBLIC_SUPABASE_URL=
 # definição e só é usada no servidor — nunca é enviada ao navegador.
 SUPABASE_SERVICE_ROLE_KEY=
 
-# Senha de acesso ao painel — defina uma senha real antes de rodar.
+# Credencial de acesso ao painel — e-mail E senha, as duas obrigatórias.
+# Não são contas de usuário: é uma credencial única da empresa, com duas
+# partes. Trocar qualquer uma encerra as sessões abertas.
+APP_EMAIL=
 APP_PASSWORD=
 ```
 
 > A chave anônima (`NEXT_PUBLIC_SUPABASE_ANON_KEY`) **não é mais necessária** — nenhum código a
 > lê desde que o acesso ao banco passou a ser exclusivamente pela `service_role` no servidor.
 
-> **`APP_PASSWORD` em branco:** em desenvolvimento, o app roda sem pedir login (conveniente, e o
+> **`APP_EMAIL` ou `APP_PASSWORD` em branco:** em desenvolvimento, o app roda sem pedir login (conveniente, e o
 > risco é local). Em produção (`NODE_ENV=production`) o app **se recusa a servir** e responde 503
-> até a variável ser definida — deixar dados de clientes acessíveis sem autenticação por descuido
-> de configuração não é um modo de falha aceitável.
+> até as variáveis serem definidas — deixar dados de clientes acessíveis sem autenticação por
+> descuido de configuração não é um modo de falha aceitável.
 
 ### 4. Instalar e rodar
 
@@ -425,14 +475,274 @@ npm run dev
 
 Acesse [http://localhost:3000](http://localhost:3000).
 
-### 5. Outros comandos
+### 5. Comandos disponíveis
+
+| Comando | O que faz | Precisa de banco? |
+|---|---|---|
+| `npm run dev` | Sobe o servidor de desenvolvimento | Sim |
+| `npm run build` | Gera o build de produção | Não |
+| `npm run start` | Serve o build de produção | Sim |
+| `npm run lint` | ESLint (config do Next) | Não |
+| `npm run test` | Suíte automatizada (Vitest) | Não |
+| `npx tsc --noEmit` | Checagem de tipos | Não |
+
+---
+
+## Como testar a aplicação
+
+Esta seção é o roteiro completo de verificação: o que a máquina checa sozinha, o que precisa de um
+par de olhos, e como provocar de propósito os erros que o sistema promete tratar bem.
+
+### Caminho rápido (sem banco, ~2 minutos)
+
+Tudo abaixo roda em repositório recém-clonado, **sem `.env.local` e sem Supabase**:
 
 ```bash
-npm run build   # gera build de produção
-npm run start   # serve o build de produção
-npm run lint    # verifica o código com ESLint
-npm run test    # roda os testes automatizados (vitest)
+npm install
+npm run test        # 8 arquivos, 202 casos — deve passar em ~2s
+npm run lint        # sem saída = sem problema
+npx tsc --noEmit    # sem saída = sem erro de tipo
+npm run build       # build de produção completo
 ```
+
+Saída esperada do `npm run test`:
+
+```
+ Test Files  8 passed (8)
+      Tests  202 passed (202)
+```
+
+### 1. Testes automatizados
+
+A suíte é **de domínio**: roda no ambiente `node`, sem jsdom, sem servidor e sem mock de
+framework. Isso é possível porque as regras de negócio não estão dentro de componentes ou rotas —
+estão em funções puras em `src/lib`, e as rotas apenas as chamam.
+
+| Arquivo | Casos | O que garante |
+|---|---|---|
+| `src/lib/csv-import.test.ts` | 77 | Normalização de valor, data e telefone; reconhecimento de colunas por alias; recusa de valor ambíguo; validação de linha; **paridade entre prévia e confirmação** (nada aprovado na prévia pode ser recusado na gravação); deduplicação e plano de importação |
+| `src/lib/prioridade.test.ts` | 38 | Dias de atraso, categorização, score, agrupamento por cliente e o ciclo de vida (`estaNaFilaHoje`): quando promessa e silêncio devolvem o título à fila |
+| `src/lib/sessao.test.ts` | 25 | Cookie de sessão: assinatura válida, recusa de valor forjado ou adulterado, expiração verificada no servidor, vínculo com o segredo |
+| `src/lib/supabase-io.test.ts` | 20 | Política de acesso ao banco: prazo (timeout), classificação de falha de infraestrutura, paginação que busca **todas** as páginas |
+| `src/lib/importacao.test.ts` | 14 | Gravação do lote: caminho normal, conflito de unicidade (duas importações simultâneas) e falhas que não são conflito |
+| `src/lib/recuperacao.test.ts` | 10 | Janela de 30 dias e soma da receita recuperada |
+| `src/lib/credenciais.test.ts` | 9 | Normalização de e-mail e derivação do segredo de sessão a partir das duas partes |
+| `src/lib/rate-limit.test.ts` | 9 | Contagem dentro da janela, expiração e expurgo de entradas velhas (o "agora" é parâmetro, então o teste acerta o relógio) |
+
+Rodar um arquivo só, ou em modo watch:
+
+```bash
+npx vitest run src/lib/prioridade.test.ts
+npx vitest            # watch
+```
+
+**O que a suíte não cobre, de propósito:** componentes React, route handlers e a integração real
+com o Supabase. Essa parte é verificada pelo roteiro manual abaixo — o que significa que uma
+mudança em tela ou rota **precisa** ser testada à mão antes de ser considerada pronta.
+
+### 2. Dados de exemplo inclusos
+
+O repositório traz dois CSVs prontos para exercitar a importação:
+
+**`teste.csv`** — o caso fácil: separador vírgula, cabeçalho canônico, 6 linhas.
+
+| Esperado na prévia | |
+|---|---|
+| Títulos prontos | **6** |
+| Linhas ignoradas | **0** |
+| Separador detectado | `,` |
+
+**`teste_varejo.csv`** — o caso real: exportação estilo ERP, separador `;`, cabeçalho em caixa alta
+(`CLIENTE`, `CELULAR`, `VL_TOTAL`, `VENCTO`), colunas extras que o Atlas ignora (`CPF/CNPJ`,
+`ENDEREÇO`, `OBS`, `VENDEDOR`), telefones em cinco formatos diferentes, valores como `R$ 3.200,00`,
+`450.50`, `1.850,00` e `200`, datas em `DD/MM/AAAA`, `AAAA-MM-DD`, `DD-MM-AAAA` e `DD.MM.AAAA`.
+
+| Esperado na prévia | |
+|---|---|
+| Títulos prontos | **11** |
+| Linhas ignoradas | **2** |
+| Linha 10 (`JOSE CARLOS BARBOSA NETO`) | recusada — `Valor inválido — "VALOR ZERADO"` |
+| Linha 11 (`Luciana Aparecida Rodrigues`) | recusada — `Data inválida — "VENCE EM AGOSTO"` |
+| Separador detectado | `;` |
+| Colunas identificadas | CLIENTE → nome, CELULAR → telefone, VL_TOTAL → valor, VENCTO → data_vencimento |
+
+> Os vencimentos desses arquivos estão em julho e agosto de 2026. Dependendo de quando você
+> testar, eles caem todos em **Vencidos** e a seção **A vencer** fica vazia — o que é o
+> comportamento correto, não um defeito. Para exercitar a seção preventiva, edite algumas datas
+> para hoje, amanhã e daqui a 3 dias.
+
+Para testar a **recusa de valor ambíguo**, acrescente esta linha ao `teste_varejo.csv`:
+
+```
+CLIENTE AMBIGUO;;11999990099;Rua Teste 1;1.500;10/12/2026;;João
+```
+
+Ela deve aparecer como **ignorada**, com a explicação de que `1.500` pode ser mil e quinhentos ou
+um e cinquenta, e as duas formas de resolver.
+
+### 3. Roteiro manual
+
+Precisa de banco configurado e `npm run dev` rodando. A ordem importa: os cenários constroem
+estado uns para os outros.
+
+#### Cenário 0 — Login e sessão
+
+1. Acesse `http://localhost:3000` deslogado → deve **redirecionar para `/login`**.
+2. Erre a senha → mensagem genérica *"E-mail ou senha incorretos"* (nunca "senha incorreta", que
+   confirmaria que o e-mail existe).
+3. Acerte e-mail e senha → entra na lista do dia.
+4. Recarregue a página → continua logado (cookie de 30 dias).
+
+✅ **Passou se:** nenhuma rota do app abre sem login, e o erro não diferencia e-mail de senha.
+
+#### Cenário 1 — Fluxo completo
+
+1. Vá em **"+ Importar CSV"** e selecione `teste_varejo.csv`.
+2. Clique em **"Analisar planilha"**. Confira a prévia contra a tabela da seção anterior:
+   11 prontos, 2 ignorados, separador `;`, colunas identificadas. **Nada foi gravado ainda.**
+3. Clique em **"Confirmar importação"** → o relatório deve informar 11 títulos importados.
+4. Vá para a **Lista do dia** e confira que os clientes aparecem na seção correta e ordenados por
+   prioridade (maior `dias × valor` no topo, entre os vencidos).
+5. Expanda uma linha → a mensagem deve citar o primeiro nome, o valor formatado em R$ e os dias de
+   atraso. Cliente com mais de um título deve ter **uma** mensagem consolidada citando todos.
+6. Clique em **enviar pelo WhatsApp** → abre o WhatsApp Web/app com o texto preenchido.
+7. Volte ao Atlas e registre **"Pago"** num título → aquele título some; a linha do cliente
+   continua se ele ainda tiver outros.
+8. Registre **"Prometeu pagar"** → deve pedir uma data antes de confirmar.
+9. Registre **"Sem resposta"** → some sem pedir data.
+
+✅ **Passou se:** os números do relatório batem com a prévia, a ordenação respeita a prioridade e
+cada resultado registrado remove só o título certo.
+
+#### Cenário 2 — Histórico do cliente
+
+1. Na lista do dia, clique no nome de um cliente que você acabou de cobrar.
+2. O histórico deve listar todos os títulos dele e, em cada um, as interações com data/hora e a
+   mensagem que foi enviada.
+
+✅ **Passou se:** o envio e o resultado registrados no cenário 1 aparecem aqui.
+
+#### Cenário 3 — Deduplicação
+
+1. Importe `teste.csv` (analisar + confirmar).
+2. Importe o **mesmo arquivo** de novo: já na prévia, antes de confirmar, deve informar que
+   6 títulos seriam ignorados por duplicação.
+3. Duplique uma linha **dentro do próprio arquivo** e importe: a prévia conta uma como duplicata e
+   a gravação grava só uma.
+4. Abra `/upload` em **duas abas**, analise o mesmo arquivo nas duas e confirme quase ao mesmo
+   tempo. As duas telas terminam sem erro e o total no banco é o do arquivo — não o dobro. Uma aba
+   reporta os títulos como gravados, a outra como duplicatas.
+
+✅ **Passou se:** em nenhum dos quatro caminhos o mesmo título entra duas vezes.
+
+#### Cenário 4 — Colunas com nomes de ERP
+
+1. Importe `teste_varejo.csv` (ou crie um CSV com `sacado`, `celular`, `vl_titulo`, `vencimento`).
+2. O sistema deve identificar as quatro colunas sozinho e ignorar as demais.
+3. Agora renomeie a coluna do valor para algo que ele não conhece (`xpto`) e analise de novo:
+   deve **falhar com uma mensagem útil**, listando as colunas encontradas e os nomes aceitos.
+
+✅ **Passou se:** o reconhecimento funciona sem configuração, e a falha explica como resolver.
+
+#### Cenário 5 — Ciclo de vida: nada some sem ser pago
+
+1. Registre **"Prometeu pagar"** num título com a data de **ontem**.
+2. Recarregue a lista do dia → o título **reaparece**, marcado com "prometeu e não pagou".
+3. Registre **"Sem resposta"** → sai da lista. Ele volta sozinho em 3 dias (para conferir sem
+   esperar, ajuste `silenciado_ate` direto no banco).
+4. Registre **"Pago"** → sai da lista e **não volta mais**.
+5. Confirme que o card **Recuperado** subiu exatamente o valor daquele título.
+
+✅ **Passou se:** só "Pago" encerra o título, e a métrica de recuperação reflete o valor exato.
+
+#### Cenário 6 — Limpeza de dados
+
+1. Acesse **"Dados"** e confira os números contra o que você importou.
+2. **"Limpar títulos pagos"** → só os pagos somem; promessa e sem resposta permanecem.
+3. **"Limpar tudo"** → o sistema volta ao estado inicial.
+
+✅ **Passou se:** a limpeza parcial preserva o que ainda é dívida em aberto.
+
+### 4. Testando os modos de falha
+
+Esta é a parte que diferencia o Atlas de um CRUD: **o sistema promete se comportar bem quando algo
+dá errado.** Vale verificar.
+
+#### Cookie de sessão forjado
+
+Com o servidor rodando e credencial configurada:
+
+```bash
+curl -i -H "Cookie: atlas_auth=1" http://localhost:3000/api/dados
+```
+
+**Esperado:** redirecionamento para `/login` — nunca os dados. O mesmo vale para um valor inventado,
+para um valor com a data de validade esticada na mão e para um cookie assinado com outra senha.
+(Esse caminho também é coberto pelos 25 casos de `sessao.test.ts`.)
+
+#### Limite de tentativas de login
+
+```bash
+for i in $(seq 1 11); do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/api/login \
+    -H 'content-type: application/json' \
+    -d '{"email":"errado@exemplo.com","password":"errada"}'
+done
+```
+
+**Esperado:** `401` nas primeiras tentativas e `429` a partir da 11ª dentro da janela de 5 minutos.
+
+#### Banco indisponível
+
+Aponte o app para um host que não existe e suba de novo:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://host-que-nao-existe.supabase.co
+```
+
+**Esperado:**
+
+- **Lista do dia:** aviso de erro em vermelho — **nunca** uma lista vazia, que significaria "não há
+  o que cobrar hoje".
+- **`/dados`:** aviso de dados indisponíveis, com botão de tentar de novo, e **sem** os botões de
+  limpeza (não se apaga o que não se consegue ler).
+- **Upload:** se a queda acontecer no meio da gravação, o relatório fica vermelho, informa quantos
+  títulos entraram antes da falha e avisa que reimportar o arquivo é seguro.
+
+#### Produção sem credencial
+
+```bash
+npm run build
+# suba o servidor com APP_EMAIL e APP_PASSWORD vazios e NODE_ENV=production
+npm run start
+```
+
+**Esperado:** HTTP **503** com a mensagem de configuração ausente — o app se recusa a servir em vez
+de abrir todas as rotas.
+
+#### Banco sem as migrations
+
+Se você criou o banco só com `schema.sql` num projeto que já existia, o card **Recuperado** mostra
+`—` em vez de `R$ 0,00`, e registrar um resultado falha com erro explícito. Isso é o comportamento
+correto: zero seria uma afirmação falsa sobre dinheiro.
+
+### 5. Checklist de aceitação
+
+| # | Verificação | Como |
+|---|---|---|
+| 1 | Suíte automatizada verde | `npm run test` → 202/202 |
+| 2 | Lint e tipos limpos | `npm run lint` · `npx tsc --noEmit` |
+| 3 | Build de produção | `npm run build` |
+| 4 | Login exigido em toda rota | Cenário 0 |
+| 5 | Prévia não grava nada | Cenário 1, passo 2 |
+| 6 | Números da prévia = números do relatório | Cenário 1, passos 2–3 |
+| 7 | Prioridade correta na fila | Cenário 1, passo 4 |
+| 8 | Importar duas vezes não duplica | Cenário 3 |
+| 9 | Colunas de ERP reconhecidas | Cenário 4 |
+| 10 | Só "Pago" encerra um título | Cenário 5 |
+| 11 | Limpeza parcial preserva dívida aberta | Cenário 6 |
+| 12 | Cookie forjado não entra | Modos de falha |
+| 13 | Banco fora do ar não vira lista vazia | Modos de falha |
 
 ---
 
@@ -446,111 +756,89 @@ src/
 │   ├── upload/page.tsx        # Importar CSV (prévia + confirmação)
 │   ├── dados/page.tsx         # Gerenciar dados
 │   ├── clientes/[id]/page.tsx # Histórico do cliente
+│   ├── globals.css            # Sistema visual: tokens de cor, tipografia e superfície
 │   └── api/
-│       ├── login/route.ts                # Autenticação
+│       ├── login/route.ts                # Autenticação (rate limit + comparação constant-time)
 │       ├── upload-csv/route.ts           # Prévia do CSV (só leitura, não grava nada)
 │       ├── upload-csv/confirmar/route.ts # Confirmação — grava clientes e títulos no banco
 │       └── dados/route.ts                # Estatísticas e limpeza
 ├── components/
-│   ├── ClienteCard.tsx        # Card do cliente — agrupa títulos, mensagem e envio de WhatsApp consolidados
-│   ├── TituloCard.tsx         # Linha de um título individual, dentro do ClienteCard
+│   ├── FilaCobranca.tsx       # A fila como <table> — uma seção (vencidos / a vencer)
+│   ├── ClienteLinha.tsx       # Linha do cliente: totais, ações e expansão com os títulos
 │   ├── Navbar.tsx             # Barra de navegação
-│   └── NavbarWrapper.tsx      # Oculta navbar na tela de login
+│   ├── NavbarWrapper.tsx      # Oculta a navbar na tela de login
+│   ├── Marca.tsx              # Símbolo e logotipo do Atlas
+│   └── ui/                    # Primitivas visuais: Botao, BotaoIcone, Badge, Icone, KpiCard
 ├── lib/
-│   ├── supabase.ts            # Cliente do banco de dados (service_role, só no servidor)
+│   ├── supabase.ts            # Cliente do banco (service_role, lazy, só no servidor)
 │   ├── supabase-io.ts         # Política de acesso: prazo, falha de dependência, paginação
-│   ├── prioridade.ts          # Priorização, agrupamento e ciclo de vida do título (estaNaFilaHoje)
+│   ├── prioridade.ts          # Priorização, agrupamento e ciclo de vida (estaNaFilaHoje)
 │   ├── recuperacao.ts         # Apuração da receita recuperada
 │   ├── csv-import.ts          # Aliases de coluna, normalização, validação e plano de importação
 │   ├── importacao.ts          # Gravação do lote de títulos (trata conflito de duplicidade)
+│   ├── credenciais.ts         # Credencial do ambiente e derivação do segredo de sessão
+│   ├── sessao.ts              # Valor de cookie assinado (HMAC) com expiração verificada
+│   ├── rate-limit.ts          # Limitador de tentativas por chave, com "agora" injetável
+│   ├── templates.ts           # Mensagens de cobrança (individuais e consolidadas)
 │   ├── format.ts              # Formatação de moeda compartilhada
-│   ├── templates.ts           # Templates das mensagens de cobrança (individuais e consolidadas)
-│   └── *.test.ts              # Testes (prioridade, csv-import, recuperacao, supabase-io, importacao)
+│   └── *.test.ts              # Os 8 arquivos de teste, ao lado do código que testam
 ├── actions/
-│   └── index.ts               # Server actions para registrar envio e atualizar status
+│   └── index.ts               # Server Actions: registrar envio e atualizar status
 ├── types/
 │   └── index.ts               # Tipos TypeScript compartilhados
-└── proxy.ts                   # Middleware de autenticação
+└── proxy.ts                   # Gate de autenticação (middleware do Next 16)
 
 supabase/
 ├── schema.sql                            # DDL — banco novo
 ├── rls.sql                               # Habilita RLS (rodar depois do schema)
 ├── migration-01-ciclo-operacional.sql    # Colunas do ciclo — bancos já existentes
 └── migration-02-titulo-aberto-unico.sql  # Índice único de título em aberto
+
+teste.csv          # Planilha de exemplo — caso simples
+teste_varejo.csv   # Planilha de exemplo — caso realista (ERP, formatos misturados, linhas ruins)
 ```
 
 ---
 
-## Roteiro de teste (para testadores)
+## Decisões de engenharia
 
-Siga estes passos para validar o funcionamento completo do sistema:
+As escolhas que explicam o código, cada uma com o arquivo onde ela vive. O raciocínio completo
+está nos comentários de cabeçalho desses arquivos e em [ARCHITECTURE.md](ARCHITECTURE.md).
 
-### Cenário 1 — Fluxo completo
-
-1. Acesse o sistema e faça login com a senha fornecida.
-2. Vá em **"+ Importar CSV"** e suba um arquivo `.csv` (modelo na seção de upload acima).
-3. Clique em **"Analisar planilha"** e confira a prévia: número de títulos prontos, duplicatas, colunas identificadas e a análise financeira. Nada foi gravado no banco ainda nesse ponto.
-4. Clique em **"Confirmar importação"** e confirme que o relatório final mostra o número correto de títulos importados.
-5. Clique em **"Ver lista do dia"** e verifique se os clientes aparecem nas seções corretas (vencidos vs. a vencer).
-6. Em um cliente vencido, clique em **"Enviar via WhatsApp"** e confirme que o WhatsApp abre com a mensagem consolidada pré-preenchida (se o cliente tiver mais de um título em aberto, a mensagem deve citar todos).
-7. Volte ao Atlas e, num dos títulos daquele cliente, registre o resultado como **"Pago"**. Aquele título deve desaparecer da lista — o card do cliente continua visível se ele ainda tiver outros títulos em aberto.
-8. Repita com **"Prometeu pagar"** — deve pedir uma data antes de confirmar.
-9. Repita com **"Sem resposta"** — deve desaparecer sem pedir data.
-
-### Cenário 2 — Histórico do cliente
-
-1. Na lista do dia, clique no nome de um cliente.
-2. Verifique se o histórico mostra todos os títulos e as interações registradas com data/hora.
-
-### Cenário 3 — Deduplicação no CSV
-
-1. Suba o mesmo arquivo CSV duas vezes (analisando e confirmando a primeira).
-2. Na segunda vez, já na etapa de prévia (antes de confirmar), o sistema deve informar que X
-   título(s) seriam ignorados por duplicação.
-3. Coloque a **mesma linha duas vezes dentro do mesmo arquivo**: a prévia deve contar uma como
-   duplicata, e a importação deve gravar apenas uma.
-4. Abra `/upload` em **duas abas**, analise o mesmo arquivo nas duas e confirme quase ao mesmo
-   tempo. As duas telas devem terminar sem erro, e o total de títulos no banco deve ser o do
-   arquivo — não o dobro. Uma das abas reporta os títulos como gravados e a outra como duplicatas.
-
-### Cenário 4 — CSV com colunas diferentes
-
-1. Crie um CSV onde as colunas se chamam `sacado`, `celular`, `vl_titulo`, `vencimento` (em vez dos nomes padrão).
-2. Importe e verifique se o sistema detecta as colunas corretamente e importa sem erros.
-
-### Cenário 5 — Ciclo de vida: nada some sem ser pago
-
-1. Num título da lista, registre **"Prometeu pagar"** com a data de **ontem**.
-2. Recarregue a lista do dia: o título deve **reaparecer**, com a marca "prometeu e não pagou".
-3. Registre **"Sem resposta"**: o título sai da lista. Ele volta sozinho após 3 dias, marcado com
-   "sem resposta antes" (para conferir sem esperar, dá para ajustar `silenciado_ate` no banco).
-4. Registre **"Pago"**: o título sai da lista e **não volta mais**.
-5. Confirme que o card **Recuperado** subiu exatamente o valor daquele título.
-
-### Cenário 6 — Limpeza de dados
-
-1. Acesse **"Dados"** na barra de navegação.
-2. Confirme os números exibidos.
-3. Use **"Limpar títulos pagos"** e verifique que os títulos em promessa/sem resposta **permanecem**
-   — só os pagos devem sumir.
-4. Use **"Limpar tudo"** para resetar o sistema ao estado inicial.
+| Decisão | Por quê | Onde |
+|---|---|---|
+| **Cookie de sessão assinado (HMAC-SHA256), com a expiração dentro do valor assinado** | O gate antes comparava o cookie com a string `1`: `curl -H 'Cookie: atlas_auth=1'` entrava sem ver a senha, inclusive nas rotas que expõem dados de clientes e apagam tudo. `maxAge` é só instrução ao navegador — quem monta a requisição à mão não obedece. | `lib/sessao.ts`, `proxy.ts` |
+| **Chave de sessão derivada de e-mail + senha** | Não introduz uma env var nova e obrigatória (cujo modo de falha seria "ninguém loga"), e dá o efeito desejável de **trocar a senha encerrar as sessões abertas**. | `lib/credenciais.ts` |
+| **Falhar fechado em produção sem credencial** | Servir dados de clientes sem autenticação por descuido de configuração não é modo de falha aceitável: 503 em vez de liberar. Em desenvolvimento, libera — o risco é local. | `proxy.ts` |
+| **Toda leitura do banco é paginada e tem prazo** | O PostgREST corta a resposta em 1000 linhas — medido neste projeto: com 1149 títulos não pagos, um `select` sem paginar devolveu 1000, e a fila perdia o resto em silêncio. E sem prazo, uma queda de DNS deixava a home carregando por mais de um minuto. | `lib/supabase-io.ts` |
+| **Lista vazia nunca pode significar "a consulta falhou"** | Falha de leitura vira exceção e aviso em vermelho; `/dados` esconde os botões de limpeza enquanto o estado real for desconhecido — já foi possível ver "0 títulos" por erro de leitura e clicar em "Limpar tudo" logo abaixo. | `app/page.tsx`, `app/dados/page.tsx` |
+| **Valor ambíguo é recusado, não adivinhado** | `1.500` é mil e quinhentos em BR e um e cinquenta em US. O sistema gravava **R$ 1,50 no lugar de R$ 1.500** sem avisar. Uma cobrança recusada e visível é melhor que uma errada e silenciosa. | `lib/csv-import.ts` |
+| **Unicidade garantida por índice parcial no banco, não por checagem no app** | Duas abas confirmando a mesma importação passavam pelas duas checagens antes de qualquer gravação. Só o banco resolve corrida; o app trata o conflito e reporta como duplicata. | `supabase/migration-02…`, `lib/importacao.ts` |
+| **Prévia e confirmação compartilham a mesma validação** | Sem isso, uma linha aprovada na prévia podia ser recusada na gravação — e há um teste de paridade só para travar essa divergência. | `lib/csv-import.ts` + `csv-import.test.ts` |
+| **"—" em vez de "R$ 0,00" quando a apuração não pôde ser feita** | Zero é uma afirmação sobre dinheiro. Se o dado não existe, o certo é dizer que não existe. | `lib/recuperacao.ts` |
+| **A fila é uma `<table>` de verdade** | São dados tabulares, e o leitor de tela depende da associação célula-cabeçalho para anunciar "Valor em aberto: R$ 5.600,00" em vez de ler números soltos. | `components/FilaCobranca.tsx` |
+| **Rate limit extraído para uma lib com "agora" injetável** | O comportamento que interessa é temporal (janela expira, contagem reinicia). Dentro da rota, só seria observável subindo servidor e esperando cinco minutos. | `lib/rate-limit.ts` |
+| **Cores e tipografia em tokens semânticos** | `bg-superficie`/`text-risco` em vez de `bg-white`/`text-red-600` permite mudar identidade, adicionar tema escuro ou um segundo domínio sem caçar classe por classe. | `app/globals.css` |
 
 ---
 
 ## Limitações conhecidas do v0
 
-- A autenticação é por senha única (não há usuários individuais nem separação por empresa).
+- A autenticação é por uma credencial única da empresa (e-mail + senha). **Não há usuários individuais**, nem separação por empresa, nem registro de quem fez cada ação.
+- O rate limit do login é em memória do processo: não sobrevive a restart nem é compartilhado entre instâncias. Serve ao deploy de instância única de hoje.
 - Não há envio automático de mensagens — o WhatsApp é aberto manualmente.
 - Não há notificações ou lembretes agendados: a reentrada de um título acontece quando você abre
   a lista do dia, não por aviso ativo.
 - A exportação de relatórios não está implementada.
 - Não há paginação **de tela** na lista do dia: todos os clientes da fila são exibidos de uma vez.
-  Com muitos títulos a página fica lenta para montar — em base de teste, ~6,6s para 915 cards. O
+  Com muitos títulos a página fica lenta para montar — em base de teste, ~6,6s para 915 linhas. O
   custo é de renderização, não de banco (a leitura em si responde em menos de 1s no mesmo cenário).
-  A *leitura* é paginada internamente e sempre completa; o que não existe é limitar quantos cards
+  A *leitura* é paginada internamente e sempre completa; o que não existe é limitar quantas linhas
   aparecem por vez.
 - Não é possível editar um cliente ou título já importado pela interface (nome ou telefone errado).
   A saída é corrigir na origem e reimportar, ou alterar direto no banco.
+- Data ambígua entre DD/MM e MM/DD (`03/04/2026`) entra sem aviso como DD/MM. Decidir olhando a
+  coluna inteira está planejado ([PLANEJAMENTO.md](PLANEJAMENTO.md) §5.3).
 
 **Sobre a métrica de receita recuperada:**
 
@@ -564,3 +852,14 @@ Siga estes passos para validar o funcionamento completo do sistema:
 - A mensagem gerada não se adapta a uma promessa quebrada: um título que volta usa o texto da
   categoria de urgência dele. Para o caso comum (título vencido) o texto funciona; para uma
   promessa sobre título ainda a vencer, a mensagem fala de vencimento e ignora o combinado.
+
+---
+
+## Documentação do projeto
+
+| Documento | Para quê |
+|---|---|
+| **README.md** (este arquivo) | O produto, como rodar e como testar |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Módulos, dependências, fluxos de dados, onde vivem as regras, pontos frágeis e observações de segurança |
+| [PLANEJAMENTO.md](PLANEJAMENTO.md) | Evolução pós-v0: limitações que bloqueiam o crescimento, arquitetura proposta, papel da IA, fases |
+| [CLAUDE.md](CLAUDE.md) | Contexto e regras de atuação para assistentes de código neste repositório |

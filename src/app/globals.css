@@ -1,20 +1,184 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f1f5f9;
-  --foreground: #0f172a;
+/* ===========================================================================
+   Atlas — sistema visual
+   ---------------------------------------------------------------------------
+   Linguagem: enterprise minimalista. Superfície branca, hierarquia por
+   tipografia e espaçamento, separação por borda de 1px em vez de sombra,
+   raios curtos. Nada aqui é decorativo: cada token tem um papel.
+
+   COMO USAR: prefira sempre o token semântico (`bg-superficie`, `text-risco`)
+   ao valor literal (`bg-white`, `text-red-600`). É isso que permite mudar a
+   identidade, adicionar tema escuro ou introduzir um segundo domínio sem
+   caçar classe por classe em 15 arquivos.
+
+   SOBRE O VERDE SER A MARCA E TAMBÉM SIGNIFICAR "PAGO": é deliberado, não
+   colisão. O Atlas existe para recuperar dinheiro — a marca e o sucesso são a
+   mesma ideia. O contexto desambigua: badge verde num título = pago; botão
+   verde = ação primária.
+   =========================================================================== */
+
+@theme {
+  /* --- Marca -------------------------------------------------------------
+     Verde profundo, dessaturado. Longe do verde-WhatsApp e do verde-neon:
+     em produto financeiro a cor precisa sustentar leitura longa e parecer
+     sóbria ao lado de números. */
+  --color-marca-50:  #f1f7f4;
+  --color-marca-100: #dcebe4;
+  --color-marca-200: #bbd8ca;
+  --color-marca-300: #8fbda8;
+  --color-marca-400: #5c9b81;
+  --color-marca-500: #3a7f64;
+  --color-marca-600: #2b6650;
+  --color-marca-700: #235242;
+  --color-marca-800: #1e4237;
+  --color-marca-900: #1a372f;
+  --color-marca-950: #0d1f1a;
+
+  /* --- Neutros -----------------------------------------------------------
+     Cinzas frios que terminam em AZUL-ESCURO, não em preto. É o que dá o tom
+     corporativo: texto em #16203a lê como tinta de documento financeiro, e
+     preto puro numa tela branca cansa em jornada longa.
+     O verde da marca é dessaturado o bastante para conviver com o frio sem
+     sujar — o que não funcionaria com um verde vivo. */
+  --color-tinta-50:  #f8f9fb;
+  --color-tinta-100: #eff1f5;
+  --color-tinta-200: #dfe3ea;
+  --color-tinta-300: #c5cdd9;
+  --color-tinta-400: #98a3b5;
+  --color-tinta-500: #6f7b90;
+  --color-tinta-600: #556174;
+  --color-tinta-700: #3f4a5d;
+  --color-tinta-800: #2a3345;
+  --color-tinta-900: #16203a;
+  --color-tinta-950: #0c1322;
+
+  /* --- Semânticos de domínio --------------------------------------------
+     Esta é a gramática que o usuário lê ANTES do texto. Não trocar por
+     estética: a fila inteira é interpretada por estas três cores.
+       risco    = vencido, cobrar hoje
+       atencao  = vence em breve, preventivo
+       marca    = pago / dinheiro recuperado
+     Tons dessaturados de propósito — vermelho vivo numa lista inteira de
+     inadimplentes vira ruído e para de significar urgência. */
+  --color-risco-50:  #fdf3f2;
+  --color-risco-100: #fbe3e1;
+  --color-risco-200: #f6cbc7;
+  --color-risco-500: #c2544a;
+  --color-risco-600: #a8433a;
+  --color-risco-700: #8b362f;
+
+  --color-atencao-50:  #fdf7ed;
+  --color-atencao-100: #f9ebd2;
+  --color-atencao-200: #f2d9ab;
+  --color-atencao-500: #b8863a;
+  --color-atencao-600: #9c6f2c;
+  --color-atencao-700: #7e5824;
+
+  /* --- Papéis de superfície ---------------------------------------------
+     Nomeados pelo papel, não pela cor. Um tema escuro futuro redefine só
+     estes seis valores. */
+  --color-superficie:         #ffffff;
+  --color-superficie-sutil:   #f8f9fb;
+  --color-superficie-afundada: #eff1f5;
+  --color-borda:              #e4e8ee;
+  --color-borda-forte:        #c5cdd9;
+  --color-texto:              #16203a;
+  --color-texto-suave:        #556174;
+  --color-texto-fraco:        #98a3b5;
+  /* Fundo de cabeçalho de tabela e de linha sob o cursor. Separados dos
+     demais porque mudam juntos e com frequência ao calibrar densidade. */
+  --color-cabecalho:          #f8f9fb;
+  --color-linha-hover:        #f4f6fa;
+
+  /* --- Raios -------------------------------------------------------------
+     Curtos. Cartão de 16px arredondado lê como app de consumo; este produto
+     mostra dinheiro devido. */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+
+  /* --- Elevação ----------------------------------------------------------
+     Uma sombra só, quase imperceptível, reservada a coisas que flutuam de
+     verdade (menu, popover). Superfície comum separa por BORDA. */
+  --shadow-flutuante: 0 4px 16px -4px rgb(18 20 19 / 0.12), 0 1px 3px rgb(18 20 19 / 0.06);
+
+  /* --- Tipografia ---------------------------------------------------------
+     Duas famílias, com papéis separados — é daqui que vem a assinatura do
+     produto, já que a identidade não usa ornamento:
+
+       sans (Inter)      texto, rótulos, ações. Neutra de propósito.
+       mono (Plex Mono)  DINHEIRO e identificadores (telefone, datas curtas).
+
+     Números em mono não é estética: um painel de cobrança é lido varrendo
+     colunas de valores de cima a baixo, e a mono dá a cada dígito a mesma
+     largura e um desenho que não se confunde (o 0 tem corte, o 1 tem base).
+     Inter com tabular-nums já alinhava; a mono torna o número reconhecível
+     como número à distância, e cria o contraste que uma tela sem ornamento
+     precisa para não parecer chapada. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+
+  /* --- Escala de tipo -----------------------------------------------------
+     Nomeada por PAPEL, não por tamanho. Existe porque a primeira versão deste
+     sistema saiu espalhando `text-[13px]`, `text-[15px]`, `text-[22px]` pelas
+     telas — que é o hábito que um sistema de design serve para eliminar.
+     Cada degrau traz altura de linha e espacejamento junto, porque tamanho
+     sem os dois não define nada. */
+  --text-micro: 11px;
+  --text-micro--line-height: 14px;
+  --text-micro--letter-spacing: 0.01em;
+
+  --text-legenda: 12px;
+  --text-legenda--line-height: 16px;
+
+  --text-corpo: 13px;
+  --text-corpo--line-height: 19px;
+
+  --text-base: 14px;
+  --text-base--line-height: 21px;
+
+  --text-destaque: 15px;
+  --text-destaque--line-height: 21px;
+  --text-destaque--letter-spacing: -0.006em;
+
+  --text-titulo: 18px;
+  --text-titulo--line-height: 24px;
+  --text-titulo--letter-spacing: -0.015em;
+
+  /* Valores dos indicadores. Tracking negativo: número grande em mono abre
+     demais e perde densidade. */
+  --text-cifra: 22px;
+  --text-cifra--line-height: 26px;
+  --text-cifra--letter-spacing: -0.02em;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* ---------------------------------------------------------------------------
+   Base
+   --------------------------------------------------------------------------- */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  background: var(--color-superficie-sutil);
+  color: var(--color-texto);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Todo número de dinheiro e todo identificador (telefone, documento) usa a
+   mono, com largura de dígito fixa. Sem largura fixa a coluna de valores
+   "dança" a cada render e fica impossível comparar de relance — que é
+   literalmente a tarefa do usuário na lista do dia. */
+.numero {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em; /* Plex Mono é larga; sem isso o valor ocupa espaço demais */
+}
+
+/* Foco visível e consistente. Acessibilidade não é opcional num produto que
+   alguém opera o dia inteiro no teclado. */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--color-marca-500);
+  outline-offset: 2px;
 }

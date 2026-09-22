@@ -102,31 +102,31 @@ export default function DadosPage() {
   }
 
   return (
-    <main className="max-w-3xl mx-auto px-4 py-6">
+    <main className="max-w-6xl mx-auto px-4 py-6">
       {/* Header */}
       <div className="mb-6">
         <div className="mb-1">
-          <Link href="/" className="text-slate-400 hover:text-slate-600 text-sm transition-colors">
+          <Link href="/" className="text-texto-fraco hover:text-texto-suave text-base transition-colors">
             ← Lista do dia
           </Link>
         </div>
-        <h2 className="text-xl font-bold text-slate-900">Gerenciar dados</h2>
-        <p className="text-sm text-slate-500 mt-0.5">Visão geral do banco e opções de limpeza para testes</p>
+        <h2 className="text-cifra font-bold text-texto">Gerenciar dados</h2>
+        <p className="text-base text-texto-suave mt-0.5">Visão geral do banco e opções de limpeza para testes</p>
       </div>
 
       {/* Indisponibilidade: nenhum número é melhor do que um número falso.
           Os botões de exclusão ficam escondidos enquanto não sabemos o estado
           do banco — apagar dado às cegas é a pior coisa que se pode fazer aqui. */}
       {indisponivel && !loadingStats && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 text-sm">
-          <p className="text-red-800 font-semibold">Dados indisponíveis</p>
-          <p className="text-red-700 text-xs mt-1 leading-relaxed">{indisponivel}</p>
+        <div className="bg-risco-50 border border-risco-200 rounded-md p-4 mb-6 text-base">
+          <p className="text-risco-700 font-semibold">Dados indisponíveis</p>
+          <p className="text-risco-700 text-legenda mt-1 leading-relaxed">{indisponivel}</p>
           <button
             onClick={() => {
               setLoadingStats(true);
               carregarStats();
             }}
-            className="mt-3 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-100 transition-colors"
+            className="mt-3 text-legenda font-semibold px-3 py-1.5 rounded-lg bg-superficie border border-risco-200 text-risco-700 hover:bg-risco-100 transition-colors"
           >
             Tentar de novo
           </button>
@@ -137,9 +137,9 @@ export default function DadosPage() {
       <div className={`grid grid-cols-2 md:grid-cols-3 gap-3 mb-6 ${indisponivel && !loadingStats ? 'hidden' : ''}`}>
         {loadingStats ? (
           Array.from({ length: 7 }).map((_, i) => (
-            <div key={i} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm animate-pulse">
-              <div className="h-3 bg-slate-100 rounded w-2/3 mb-2" />
-              <div className="h-6 bg-slate-100 rounded w-1/2" />
+            <div key={i} className="bg-superficie border border-borda rounded-md p-4 animate-pulse">
+              <div className="h-3 bg-superficie-afundada rounded w-2/3 mb-2" />
+              <div className="h-6 bg-superficie-afundada rounded w-1/2" />
             </div>
           ))
         ) : stats ? (
@@ -181,13 +181,13 @@ export default function DadosPage() {
             />
           </>
         ) : (
-          <p className="text-sm text-slate-400 col-span-3">Erro ao carregar dados.</p>
+          <p className="text-base text-texto-fraco col-span-3">Erro ao carregar dados.</p>
         )}
       </div>
 
       {/* Sucesso da exclusão */}
       {mensagem && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex gap-2.5 text-sm text-emerald-800 mb-6">
+        <div className="bg-marca-50 border border-marca-200 rounded-md p-3.5 flex gap-2.5 text-base text-marca-800 mb-6">
           <span>✅</span>
           <span>{mensagem}</span>
         </div>
@@ -196,11 +196,11 @@ export default function DadosPage() {
       {/* Falha da exclusão — vermelho, nunca verde. A exclusão pode ter parado
           no meio, e o usuário precisa saber disso antes de tentar de novo. */}
       {erroExclusao && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex gap-2.5 text-sm mb-6">
+        <div className="bg-risco-50 border border-risco-200 rounded-md p-3.5 flex gap-2.5 text-base mb-6">
           <span className="shrink-0">❌</span>
           <div>
-            <p className="text-red-800 font-semibold">A exclusão não foi concluída</p>
-            <p className="text-red-700 text-xs mt-0.5 leading-relaxed">{erroExclusao}</p>
+            <p className="text-risco-700 font-semibold">A exclusão não foi concluída</p>
+            <p className="text-risco-700 text-legenda mt-0.5 leading-relaxed">{erroExclusao}</p>
           </div>
         </div>
       )}
@@ -209,16 +209,16 @@ export default function DadosPage() {
           Era possível ver "0 títulos" por falha de leitura e clicar em
           "Limpar tudo" logo abaixo, achando que não havia nada a perder. */}
       <div
-        className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${
+        className={`bg-superficie border border-borda rounded-lg overflow-hidden ${
           indisponivel && !loadingStats ? 'hidden' : ''
         }`}
       >
-        <div className="px-5 py-4 border-b border-slate-100 bg-slate-50">
-          <h3 className="text-sm font-semibold text-slate-700">Zona de perigo</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Ações irreversíveis — não há desfazer</p>
+        <div className="px-5 py-4 border-b border-borda bg-superficie-sutil">
+          <h3 className="text-base font-semibold text-texto">Zona de perigo</h3>
+          <p className="text-legenda text-texto-fraco mt-0.5">Ações irreversíveis — não há desfazer</p>
         </div>
 
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-borda">
           <AcaoPerigo
             titulo="Limpar títulos pagos"
             descricao="Remove apenas títulos já pagos, com o histórico de interações deles. Títulos aguardando follow-up (promessa ou sem resposta) são mantidos — continuam sendo dívida em aberto."
@@ -259,20 +259,20 @@ function StatCard({
   hint?: string;
 }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-      <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">{label}</p>
+    <div className="bg-superficie border border-borda rounded-md p-4 ">
+      <p className="text-legenda font-medium text-texto-suave uppercase tracking-wide mb-1">{label}</p>
       <p
-        className={`text-xl font-bold truncate ${
+        className={`text-cifra font-bold truncate ${
           highlight === 'blue'
-            ? 'text-blue-600'
+            ? 'text-marca-700'
             : highlight === 'red'
-            ? 'text-red-600'
-            : 'text-slate-800'
+            ? 'text-risco-600'
+            : 'text-texto'
         }`}
       >
         {value}
       </p>
-      {hint && <p className="text-xs text-slate-400 mt-1 leading-tight">{hint}</p>}
+      {hint && <p className="text-legenda text-texto-fraco mt-1 leading-tight">{hint}</p>}
     </div>
   );
 }
@@ -298,22 +298,22 @@ function AcaoPerigo({
   onConfirmar: () => void;
   onCancelar: () => void;
 }) {
-  const btnBase = 'text-sm font-semibold px-4 py-2 rounded-lg transition-colors whitespace-nowrap';
+  const btnBase = 'text-base font-semibold px-4 py-2 rounded-lg transition-colors whitespace-nowrap';
   const corSolicitacao =
     cor === 'red'
-      ? 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200'
-      : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200';
+      ? 'bg-risco-50 hover:bg-risco-100 text-risco-700 border border-risco-200'
+      : 'bg-atencao-50 hover:bg-atencao-100 text-atencao-700 border border-atencao-200';
   const corConfirmar =
     cor === 'red'
-      ? 'bg-red-600 hover:bg-red-700 text-white disabled:opacity-50'
-      : 'bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50';
+      ? 'bg-risco-600 hover:bg-risco-700 text-white disabled:opacity-50'
+      : 'bg-atencao-500 hover:bg-atencao-600 text-white disabled:opacity-50';
 
   return (
     <div className="px-5 py-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-slate-700">{titulo}</p>
-          <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{descricao}</p>
+          <p className="text-base font-semibold text-texto">{titulo}</p>
+          <p className="text-legenda text-texto-fraco mt-0.5 leading-relaxed">{descricao}</p>
         </div>
 
         {!confirmando ? (
@@ -322,7 +322,7 @@ function AcaoPerigo({
           </button>
         ) : (
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <span className="text-xs font-semibold text-red-700">Tem certeza?</span>
+            <span className="text-legenda font-semibold text-risco-700">Tem certeza?</span>
             <button
               onClick={onConfirmar}
               disabled={deletando}
@@ -333,7 +333,7 @@ function AcaoPerigo({
             <button
               onClick={onCancelar}
               disabled={deletando}
-              className={`${btnBase} bg-slate-100 hover:bg-slate-200 text-slate-700`}
+              className={`${btnBase} bg-superficie-afundada hover:bg-superficie-afundada text-texto`}
             >
               Cancelar
             </button>
