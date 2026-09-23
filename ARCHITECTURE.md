@@ -41,21 +41,23 @@ um repositório; ela impede que cada ponto de chamada invente o próprio tratame
 
 | Módulo | Arquivos | Responsabilidade |
 |---|---|---|
-| **Autenticação** | `src/proxy.ts`, `src/app/api/login/route.ts`, `src/app/login/page.tsx`, `src/lib/sessao.ts`, `src/lib/credenciais.ts` | Gate por credencial única de duas partes (`APP_EMAIL` + `APP_PASSWORD`) + cookie httpOnly **assinado (HMAC-SHA256)** de 30 dias + rate limiting em memória. **Não são contas de usuário** — ver §9 |
+| **Autenticação** | `src/proxy.ts`, `src/app/api/login/route.ts`, `src/app/api/logout/route.ts`, `src/app/login/page.tsx`, `src/lib/sessao.ts`, `src/lib/credenciais.ts` | Gate por credencial única de duas partes (`APP_EMAIL` + `APP_PASSWORD`) + cookie httpOnly **assinado (HMAC-SHA256)** de 30 dias + rate limiting em memória. Saída por `POST /api/logout`, que apaga o cookie deste navegador. Nome do cookie em `COOKIE_SESSAO` (`lib/sessao.ts`). **Não são contas de usuário** — ver §9 |
 | **Ingestão de CSV** | `src/app/api/upload-csv/route.ts`, `src/app/api/upload-csv/confirmar/route.ts`, `src/lib/csv-import.ts`, `src/app/upload/page.tsx` | Parse, normalização, validação (prévia e confirmação), dedup e gravação de títulos importados |
 | **Domínio de priorização** | `src/lib/prioridade.ts`, `src/lib/templates.ts`, `src/types/index.ts` | Cálculo de urgência/score, agrupamento por cliente, geração de mensagens |
-| **Formatação de exibição** | `src/lib/format.ts` | `formatarMoeda`, reaproveitado por todas as telas |
+| **Formatação de exibição** | `src/lib/format.ts` | Moeda, plural, telefone, data de calendário sem passar por fuso, hora, rótulo de vencimento ("12 dias em atraso", "vence amanhã") e `instanteDoBanco` — que lê como UTC o `timestamp` sem fuso que o banco devolve (ver §10) |
+| **Último contato** | `src/lib/contato.ts` | Último contato por cliente a partir de `interacoes.data_envio`, o rótulo "hoje às 10:32" / "há 3 dias" e o rótulo de retorno à fila (`rotuloReentrada`). Apresentação, não regra de negócio: "hoje" usa o mesmo relógio de `calcularDiasAtraso`. O domínio chama de `promessa_vencida` também a promessa PARA HOJE; o rótulo a distingue ("promessa para hoje"), porque no próprio dia ela não foi quebrada |
 | **Leitura de resposta HTTP (navegador)** | `src/lib/resposta-http.ts` | `chamarApi` / `lerResposta`: o que as telas de login, importação e dados usam no lugar de `fetch` + `res.json()`. Classifica a resposta em ok, erro com corpo, sessão expirada (desvio para `/login`), sem conexão e corpo inválido. Nunca rejeita. A frase final é de quem chama |
-| **Lista do dia (apresentação)** | `src/app/page.tsx`, `src/components/FilaCobranca.tsx`, `src/components/ClienteLinha.tsx` | Renderiza a fila priorizada como TABELA, uma linha por cliente, e captura as ações. A linha expande para mostrar a mensagem consolidada e os títulos individuais |
-| **Histórico do cliente** | `src/app/clientes/[id]/page.tsx` | Leitura de títulos + interações de um cliente |
+| **Lista do dia (apresentação)** | `src/app/page.tsx`, `src/components/FilaCobranca.tsx`, `src/components/ClienteLinha.tsx` | Renderiza a fila priorizada como TABELA, uma linha por cliente, e captura as ações. Cada linha mostra o último contato e, se for o caso, por que o título voltou à fila. A linha expande para a mensagem consolidada, o envio pelo WhatsApp e os títulos individuais, onde o resultado é registrado. "Pago" pede confirmação |
+| **Avisos flutuantes** | `src/components/Avisos.tsx` | Provedor no layout (`useAvisos`) para a confirmação de um registro. Fica fora da fila porque a revalidação tira da tela a linha que acabou de ser registrada |
+| **Histórico do cliente** | `src/app/clientes/[id]/page.tsx` | Leitura de títulos + interações de um cliente, com situação e urgência de cada título |
 | **Mutação de estado** | `src/actions/index.ts` | Server Actions: registrar envio, atualizar status de título |
 | **Administração** | `src/app/dados/page.tsx`, `src/app/api/dados/route.ts` | Estatísticas agregadas + limpeza destrutiva de dados (protegida por frase de confirmação) |
 | **Acesso a dados** | `src/lib/supabase.ts` | Client Supabase único (service_role), lazy-init via Proxy |
 | **Política de I/O** | `src/lib/supabase-io.ts` | Prazo (8s leitura / 15s escrita), classificação infra × banco, paginação por cursor, e leitura que lança em vez de devolver vazio |
-| **Sistema visual** | `src/app/globals.css`, `src/components/ui/`, `src/components/Marca.tsx` | Tokens semânticos em `@theme` — cor (superficie, borda, texto, marca, risco, atencao) e escala de tipo nomeada por papel (micro→cifra, cada degrau com altura de linha e tracking) — mais as primitivas que os consomem. Duas famílias: Inter para texto, IBM Plex Mono para dinheiro e identificadores (classe `.numero`). Telas usam token, nunca cor ou tamanho literal |
+| **Sistema visual** | `src/app/globals.css`, `src/components/ui/`, `src/components/Marca.tsx`, `src/app/icon.svg` | Tokens semânticos em `@theme` — cor (superficie, borda, texto, marca, risco, atencao), escala de tipo nomeada por papel (micro→cifra, cada degrau com altura de linha e tracking) e uma animação (`entrar`) — mais as primitivas que os consomem: `Pagina`, `CabecalhoPagina` (o h1), `Painel`, `Aviso`, `KpiCard`, `Badge`, `Botao`/`estiloBotao`, `BotaoIcone`, `Icone`. Duas famílias: Inter para texto, IBM Plex Mono para dinheiro e identificadores (classe `.numero`). Telas usam token, nunca cor ou tamanho literal. Todas as telas estão no sistema desde 2026-09-23 |
 | **Limite de tentativas** | `src/lib/rate-limit.ts` | Janela, contagem por chave e expurgo das entradas expiradas, com o "agora" injetável. Estado por processo — não sobrevive a restart nem é compartilhado entre instâncias |
 | **Gravação da importação** | `src/lib/importacao.ts` | Máquina de estados que grava um lote convivendo com o índice único: conflito vira duplicata, e a conciliação final diz o que de fato ficou no banco. Recebe as operações de banco como parâmetro (`Portas`), então é testável com dublês |
-| **Layout / navegação** | `src/app/layout.tsx`, `src/components/Navbar.tsx`, `src/components/NavbarWrapper.tsx` | Casca visual, esconde navbar no login |
+| **Layout / navegação** | `src/app/layout.tsx`, `src/components/Navbar.tsx`, `src/components/NavbarWrapper.tsx`, `src/app/loading.tsx`, `src/app/error.tsx`, `src/app/not-found.tsx`, `src/app/{login,upload,dados}/layout.tsx` | Casca visual: barra superior (com "Sair"; no celular, só ícones), link de pular para o conteúdo, provedor de avisos, título da aba por tela (`%s · Atlas`), carregamento, erro e 404 próprios. Esconde a barra no login. Os `layout.tsx` de rota existem só para o título: página Client Component não exporta `metadata` |
 
 Os módulos sem acesso direto ao banco são **priorização** (`lib/prioridade.ts` +
 `lib/templates.ts`), **ingestão de CSV** (`lib/csv-import.ts`), **formatação** (`lib/format.ts`) e
@@ -76,7 +78,7 @@ justamente o que falhou: `?? 0` espalhado por `/api/dados` transformava apagão 
 **Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`,
 `supabase-io.test.ts`, `importacao.test.ts`, `sessao.test.ts`, `rate-limit.test.ts`, `credenciais.test.ts`,
 `resposta-http.test.ts`.
-`lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
+`format.test.ts`, `contato.test.ts`. `lib/templates.ts` **não tem** testes. Nenhuma rota,
 Server Action ou componente React tem cobertura — a verificação deles é manual (`npm run dev`) ou
 via E2E ad-hoc.
 
@@ -103,9 +105,11 @@ dados/page.tsx ──▶ api/dados (fetch) ──▶ lib/prioridade.ts (calcular
 
 (todo "fetch" acima sai de lib/resposta-http.ts::chamarApi — login/page.tsx também)
 
-clientes/[id]/page.tsx ──▶ lib/format.ts + lib/supabase-io.ts ──▶ lib/supabase.ts
-                       (não usa lib/prioridade.ts — exibe por data_vencimento, não por urgência,
-                       o que faz sentido pra uma tela de histórico, não é bug)
+clientes/[id]/page.tsx ──▶ lib/format.ts + lib/contato.ts + lib/supabase-io.ts ──▶ lib/supabase.ts
+                       └─▶ lib/prioridade.ts (calcularDiasAtraso, categorizarTitulo — só para a
+                           etiqueta de urgência; a ORDEM continua por data_vencimento)
+
+app/page.tsx ──▶ lib/contato.ts (último contato por cliente, calculado no servidor)
 
 lib/importacao.ts ──▶ lib/csv-import.ts + tipos de lib/supabase-io.ts
                    (NÃO importa lib/supabase.ts — recebe as operações de banco como parâmetro)
@@ -121,8 +125,9 @@ Pontos a notar:
 - **`lib/supabase-io.ts` é atravessado por todos eles** — não substitui `lib/supabase.ts`, envolve
   a chamada com prazo, classificação de falha e paginação.
 - **`lib/prioridade.ts` agora é usado pela Lista do Dia E por `/api/dados`** (para "valor
-  vencido"). O histórico do cliente (`clientes/[id]/page.tsx`) continua sem usá-lo — por design,
-  não por descuido: lá a ordenação é cronológica (mais recente primeiro), não por urgência.
+  vencido"). O histórico do cliente (`clientes/[id]/page.tsx`) usa só `calcularDiasAtraso` e
+  `categorizarTitulo`, para pintar a urgência de cada título com a mesma escala da fila; a
+  ORDENAÇÃO de lá continua cronológica (mais recente primeiro), não por urgência.
 - **`ClienteCard.tsx` foi substituído por `ClienteLinha.tsx` em 2026-09-19** (a fila virou tabela);
   o registro abaixo é histórico. Antes disso ele existia no código
   (bem construído, com sua própria lógica de agrupamento e mensagem consolidada) mas não era
@@ -140,18 +145,27 @@ Pontos a notar:
 ### 4.1 Lista do dia (leitura + mutação)
 
 ```
-Supabase: titulos JOIN clientes (status != pago)   ← o domínio é quem filtra a fila
+Supabase: titulos JOIN clientes + interacoes(data_envio)   (status != pago)
+                                                    ← o domínio é quem filtra a fila
    → priorizarTitulos()      [lib/prioridade.ts — estaNaFilaHoje decide quem entra;
                               calcula score, categoria, dias, mensagem, motivoReentrada]
    → agruparPorCliente()     [lib/prioridade.ts — agrupa por cliente_id, mensagem consolidada]
+   → ultimoContatoPorCliente [lib/contato.ts — rótulo "hoje às 10:32" pronto, no servidor]
    → HomePage (Server Component)
    → FilaCobranca (tabela) → ClienteLinha (Client Component)
-   → usuário clica "Enviar WhatsApp" ou marca status
+   → usuário clica "Enviar WhatsApp" ou marca status ("pago" pede confirmação)
    → Server Action (actions/index.ts)
    → grava em `interacoes` (sempre) e `titulos.status` (ao marcar resultado)
    → revalidatePath('/') + revalidatePath('/clientes', 'layout')
-   → próxima navegação refaz o fetch do zero
+   → a tela é atualizada NA HORA (Server Function + revalidatePath, doc do Next 16): o título
+     registrado sai da fila, e com o único título do cliente a linha inteira some
+   → a confirmação do registro vai para o aviso flutuante (components/Avisos.tsx), fora da fila
 ```
+
+O embed `interacoes(data_envio)` traz só a data de cada contato, não a mensagem, e não muda a
+paginação, que continua por `titulos.id`. O rótulo de contato é calculado no servidor porque
+depende do relógio: calculado no navegador, servidor e navegador poderiam discordar sobre o fuso
+na hidratação.
 
 Não há cache de aplicação — cada carregamento da home é uma query nova ao Supabase
 (`revalidate = 0`, `dynamic = 'force-dynamic'`).
@@ -244,8 +258,11 @@ virava descarte silencioso na hora de gravar.
 Supabase: clientes (by id) + titulos JOIN interacoes (by cliente_id)
    → clientes/[id]/page.tsx (Server Component, renderização direta)
 ```
-Não passa por `lib/prioridade.ts`; a ordenação por urgência/status não existe aqui — a exibição é
-por `data_vencimento` (mais recente primeiro).
+A ordenação por urgência não existe aqui — a exibição é por `data_vencimento` (mais recente
+primeiro). `lib/prioridade.ts` entra só para a etiqueta de urgência de cada título
+(`calcularDiasAtraso` + `categorizarTitulo` + `tomDaCategoria`), a mesma escala de cor da fila.
+As horas das interações passam por `instanteDoBanco` (ver §10): `data_envio` é `timestamp` sem
+fuso, e ler como hora local as adiantava três horas.
 
 Detalhe que parece um erro e não é: a **consulta** ordena por `id`, não por `data_vencimento`. É
 exigência da paginação por cursor (a chave precisa ser única e estável, e `data_vencimento` não é);
@@ -259,7 +276,8 @@ dados/page.tsx (Client Component)
    --fetch GET--> /api/dados        → agregações (count/sum) + lib/recuperacao.ts::totalRecuperado
    --fetch DELETE--> /api/dados?modo=tudo|concluidos → apaga linhas em cascata manual
                      modo=concluidos apaga SOMENTE status='pago' (ver §5)
-                     modo=tudo exige a frase "EXCLUIR TUDO" no corpo (ver §9)
+                     modo=tudo exige a frase "EXCLUIR TUDO" no corpo (ver §9) — e a TELA
+                     só a envia depois que a pessoa a digita
 ```
 Único fluxo do sistema em que a UI é Client Component chamando uma API Route via `fetch` em vez
 de Server Component + Server Action.
@@ -372,9 +390,10 @@ deles.
   quebra a compilação do front — só quebra em runtime.
 - **`revalidatePath('/')` / `revalidatePath('/clientes', 'layout')` hardcoded** em
   `actions/index.ts` — a Server Action conhece explicitamente as rotas da aplicação.
-- **Casts manuais de tipo** (`as (Titulo & { clientes: Cliente })[]` em `page.tsx`) e tipos
-  redefinidos inline em vez de importados (`clientes/[id]/page.tsx` redefine o shape de título
-  localmente em vez de usar `types/index.ts`) — o compilador não pega divergência de schema.
+- **O formato do `select` é declarado à mão** (`TituloDaFila` em `page.tsx`,
+  `TituloComHistorico` em `clientes/[id]/page.tsx`), montado sobre `types/index.ts` — o
+  compilador não pega divergência entre o tipo e o que o PostgREST devolve de fato. (O histórico
+  redefinia o shape inteiro do título inline; desde 2026-09-23 usa os tipos compartilhados.)
 
 ---
 
@@ -475,6 +494,15 @@ deles.
 - RLS está habilitado nas 3 tabelas sem nenhuma política (`supabase/rls.sql`), e todo acesso passa
   pela `service_role` key usada só no servidor (`lib/supabase.ts`, agora corrigido) — esse modelo
   é o correto para uma instância única sem Supabase Auth.
+- **`POST /api/logout` é pública no proxy (`PUBLIC_PATHS`), de propósito.** Ela só apaga o
+  cookie de quem chama, sem ler nem gravar dado. Protegida, falharia justamente com a sessão
+  vencida: o proxy devolveria o POST para `/login`, e o Next responde a POST numa página com 404
+  em texto. É POST, nunca GET, porque um link de saída seria disparado pelo prefetch do `Link`. O
+  pior que alguém de fora consegue é deslogar o próprio navegador de quem visitar uma página
+  maliciosa — incômodo, não vazamento. Não derruba sessões em outros aparelhos: não há lista de
+  sessões no servidor.
+- **`/icon.svg` fica fora do `matcher` do proxy**, como o favicon ficava: é arte estática, e
+  atrás do login a própria tela de login ficava sem ícone (medido: 307 para `/login`).
 
 ---
 
@@ -482,11 +510,13 @@ deles.
 
 - Sem camada de repositório: mudar um nome de coluna ou tabela exige busca manual em todos os
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
-- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **218 casos**, todos
+- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **246 casos**, todos
   em `src/lib/`. Cobrem score e categorização (`prioridade`), parsing e planejamento do lote
   (`csv-import`), apuração (`recuperacao`), classificação de falha e paginação por cursor
   (`supabase-io`), a máquina de estados de conflito (`importacao`), a assinatura/expiração do
-  cookie de sessão (`sessao`) e a leitura de resposta de API no navegador (`resposta-http`).
+  cookie de sessão (`sessao`), a leitura de resposta de API no navegador (`resposta-http`), a
+  formatação de exibição (`format`, inclusive o `timestamp` sem fuso) e o último contato
+  (`contato`).
   **O que continua sem cobertura**: Server Actions, as rotas de API como integração, componentes
   React, o encadeamento HTTP entre UI e backend, o comportamento sob dependência indisponível e a
   concorrência real contra o Postgres. Esses seguem provados apenas por reprodução manual.
@@ -507,9 +537,22 @@ deles.
   ~3,8s para 734 cards (1149 títulos) e ~6,6s para 915 cards. O custo é **render, não banco** — a
   consulta paginada responde em menos de 1s no mesmo cenário. Paginação de UI continua fora de
   escopo por decisão, mas é o próximo gargalo real de percepção, e é decisão de produto.
-- `upload/page.tsx` tem ~500 linhas, misturando estado de formulário, chamadas de rede e três
-  componentes de apresentação (`PreviewReport`, `ConfirmedReport`, `BreakdownRow`) no mesmo arquivo.
-  Não mexido — funcional, não é o gargalo atual.
+- `upload/page.tsx` tem ~710 linhas, com o estado do fluxo e quatro componentes de apresentação
+  (`Previa`, `RelatorioFinal`, `LinhaDaAnalise`, `AvisoDeFalha`) no mesmo arquivo. Mantido assim
+  de propósito: a tela de mapeamento da Fase 1 vai redesenhar este fluxo, e dividir o arquivo
+  agora seria organizar o que vai ser refeito.
+- **Horários e "hoje" seguem o relógio do servidor.** `calcularDiasAtraso`, o rótulo "Contatado
+  hoje às 10:32" e as horas do histórico usam o fuso local do processo Node. Correto enquanto o
+  servidor rodar no fuso da empresa (o caso do deploy de instância única de hoje); num servidor em
+  UTC, entre 21h e meia-noite de Brasília o sistema já estaria no dia seguinte, e as horas
+  sairiam três horas adiantadas. Não é regressão — é a premissa que o domínio sempre teve, agora
+  escrita. Resolver seria fixar o fuso da empresa em configuração, decisão que não foi tomada.
+- **`interacoes.data_envio` e `criado_em` são `timestamp` sem fuso**, preenchidos por `now()`
+  num Postgres em UTC; `resolvido_em` é `timestamptz`. Medido em 2026-09-23: a interação gravada
+  junto de um `resolvido_em` de `10:21:49+00:00` veio como `"2026-09-21T10:21:49.650311"`, sem
+  `Z`, e `new Date()` a lia como hora local. Toda leitura dessas colunas para exibir passa por
+  `lib/format.ts::instanteDoBanco`. Trocar a coluna para `timestamptz` resolveria na origem, mas é
+  migration — fica registrado, não feito.
 - Rate limiting de login em memória (ver §9) não sobrevive a múltiplas instâncias — ok pra hoje,
   vira problema real se o deploy mudar de instância única pra serverless/múltiplas réplicas.
 
@@ -556,7 +599,10 @@ autenticação por credencial única da empresa (e-mail + senha) sem usuários i
 - **Os templates de mensagem não sabem que houve promessa quebrada.** Um título que reentra usa o
   template da categoria de urgência dele. Para o caso comum (título vencido) o texto serve; para
   uma promessa sobre título ainda a vencer, a mensagem fala de vencimento e ignora o combinado.
-  `motivoReentrada` existe no domínio e é exibido como badge, mas não influencia o texto gerado.
+  `motivoReentrada` existe no domínio e é exibido como etiqueta na fila ("promessa de 12/09
+  vencida", "voltou após sem resposta"), mas não influencia o texto gerado. (A etiqueta sumiu na
+  troca de cards para tabela, em 2026-09-19, enquanto este parágrafo e o README continuavam
+  afirmando que existia; voltou em 2026-09-23.)
 
 ---
 
@@ -589,6 +635,11 @@ autenticação por credencial única da empresa (e-mail + senha) sem usuários i
   linha do cliente já tem a dela, consolidada. O que é por título é o registro de resultado.
 - Novas telas de leitura: o precedente majoritário é Server Component com query direta
   (`/dados` é a exceção histórica, não o padrão a seguir).
+- **Tela nova**: `Pagina` (contêiner) + `CabecalhoPagina` (o único h1) + `Painel` para blocos e
+  `Aviso` para mensagens, tudo de `components/ui/`. Chamada de API a partir do navegador passa por
+  `lib/resposta-http.ts::chamarApi`. Hora vinda de coluna `timestamp` do banco passa por
+  `lib/format.ts::instanteDoBanco`. Rótulo que depende do relógio ("hoje", "há 3 dias") é
+  calculado no servidor.
 - **Antes de assumir que algo documentado aqui está de fato acontecendo em produção, confira se o
   componente/módulo é realmente importado por uma página** — este projeto já teve um caso real
   (o antigo `ClienteCard.tsx`) de uma funcionalidade inteira, bem construída e documentada no README, que

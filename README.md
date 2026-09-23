@@ -2,7 +2,7 @@
 
 > Uma planilha de títulos em aberto entra. A resposta de **quem cobrar hoje, e o que mandar** sai.
 
-`Next.js 16 (App Router)` · `React 19` · `TypeScript` · `Tailwind CSS v4` · `Supabase/PostgreSQL` · `Vitest — 218 casos`
+`Next.js 16 (App Router)` · `React 19` · `TypeScript` · `Tailwind CSS v4` · `Supabase/PostgreSQL` · `Vitest — 246 casos`
 
 ---
 
@@ -16,8 +16,12 @@ em módulos testados, e as decisões difíceis estão documentadas junto do cód
 O que este repositório tenta demonstrar, além de "funciona":
 
 - **Domínio separado de I/O.** Priorização, ciclo de vida do título, parsing de CSV e apuração de
-  receita são funções puras — por isso 218 testes rodam em ~2s sem banco, sem browser e sem mock
+  receita são funções puras — por isso 246 testes rodam em ~2s sem banco, sem browser e sem mock
   de framework.
+- **Interface que diz a verdade e funciona para quem a opera.** Registro de pagamento pede
+  confirmação com o valor; cada linha da fila diz quando o cliente foi contatado pela última vez;
+  sessão expirada e queda de rede viram mensagem, nunca botão travado. Contraste AA, navegação
+  por teclado e fila que cabe numa tela de celular.
 - **Modos de falha tratados como funcionalidade.** Banco fora do ar não vira "lista vazia"; valor
   ambíguo na planilha não vira cobrança errada; ausência de senha em produção não vira app aberto.
 - **Decisões registradas, não só implementadas.** Cada escolha não-óbvia tem o porquê escrito no
@@ -93,6 +97,8 @@ O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura 
 
 O login tem limite de **10 tentativas por IP a cada 5 minutos**; passando disso, a resposta é 429 até a janela expirar. A comparação de e-mail e senha é feita em tempo constante, e as duas sempre rodam — encerrar na primeira falha faria o tempo de resposta revelar que o e-mail estava certo.
 
+**Sair** fica no canto direito da barra superior e encerra a sessão **neste navegador**. Como não existe lista de sessões no servidor, ele não derruba a sessão em outros aparelhos; para isso, troque o e-mail ou a senha.
+
 > **Para testadores:** em desenvolvimento local sem credencial configurada, o login é ignorado e você entra direto. Em produção sem credencial o app responde 503 em vez de liberar o acesso.
 
 ---
@@ -114,6 +120,10 @@ O login tem limite de **10 tentativas por IP a cada 5 minutos**; passando disso,
 > aparecer "—", a apuração não pôde ser feita (normalmente falta rodar a migration do banco) —
 > o Atlas mostra um traço em vez de R$ 0,00 de propósito, porque zero seria uma afirmação falsa.
 
+**A cor segue uma escala de urgência, a mesma em todas as telas:** vermelho = atraso longo (mais
+de 7 dias), âmbar = atraso leve (1 a 7 dias), neutro = ainda não venceu, verde = pago ou
+recuperado.
+
 **Seções da fila:**
 
 - **Vencidos — cobrar hoje**: títulos já passados do vencimento, ordenados por prioridade (quem está há mais tempo com valor maior aparece primeiro).
@@ -123,15 +133,19 @@ O login tem limite de **10 tentativas por IP a cada 5 minutos**; passando disso,
 
 **A fila é uma tabela, com uma linha por cliente — não por título.** Se um cliente tem 3 títulos em aberto, ele aparece uma única vez na lista — cobrar a pessoa, não cada título isolado, evita mandar várias mensagens separadas pra mesma pessoa no mesmo dia.
 
-**Cada linha mostra:** nome do cliente (clicável → histórico), telefone, valor total em aberto, maior atraso e quantidade de títulos. À direita ficam três ações padronizadas em ícone: **enviar pelo WhatsApp** (abre a conversa com a mensagem pronta e registra o envio), **ligar** (abre o discador) e **marcar como pago**.
+**Cada linha mostra:** nome do cliente (clicável → histórico), telefone, valor total em aberto, maior atraso e quantidade de títulos. Logo abaixo do nome aparece **quando foi o último contato** ("Contatado hoje às 10:32", "Último contato há 3 dias") e, se o título voltou para a fila, **por quê** ("promessa de 12/09 vencida", "voltou após sem resposta"). O cabeçalho de cada seção conta os clientes e mostra quantos **já foram contatados hoje** — o título continua na fila depois do envio, e é isso que evita cobrar a mesma pessoa duas vezes no dia.
+
+À direita ficam três ações padronizadas em ícone: **enviar pelo WhatsApp** (abre a conversa com a mensagem pronta e registra o envio), **ligar** (abre o discador) e **marcar como pago**. Marcar como pago **pede confirmação**, dizendo o valor: é o único resultado sem volta, e a tela não oferece desfazer.
 
 **Ao expandir a linha** (seta à esquerda) aparecem:
 
 - A **mensagem de cobrança consolidada**, gerada automaticamente (texto pronto para copiar ou enviar)
-- Botão **"Enviar via WhatsApp"** — abre o WhatsApp com a mensagem consolidada preenchida e registra o envio em todos os títulos em aberto daquele cliente
-- Uma lista compacta com cada título individual do cliente: valor, badge de dias em atraso/a vencer, e seus próprios botões de resultado — **Pago**, **Prometeu pagar**, **Sem resposta** — porque o cliente pode pagar um título e não outro
+- Botões **"Enviar pelo WhatsApp"** — abre o WhatsApp com a mensagem consolidada preenchida e registra o envio em todos os títulos em aberto daquele cliente — e **"Ligar"**, com o número
+- Uma lista compacta com cada título individual do cliente: valor, data de vencimento, situação e seus próprios botões de resultado — **Pago** (com confirmação), **Prometeu pagar** (pede a data, que não pode estar no passado) e **Sem resposta** — porque o cliente pode pagar um título e não outro
 
-Ao registrar um resultado, aquele título some da lista do dia. A linha do cliente continua aparecendo enquanto ele tiver outros títulos pendentes.
+Ao registrar um resultado, aquele título some da lista do dia na hora, e um **aviso no canto da tela** confirma o que foi gravado ("Fulano: pagamento de R$ 500,00 registrado."). A linha do cliente continua aparecendo enquanto ele tiver outros títulos pendentes.
+
+**No celular** a fila não rola para os lados: valor e atraso descem para baixo do nome, e as três ações continuam à vista.
 
 Se o resultado foi **prometeu pagar** ou **sem resposta**, o título não foi encerrado — ele volta à lista depois (na data prometida, ou passados alguns dias de silêncio) marcado com o motivo do retorno, para você saber que já falou com essa pessoa. Só **pago** encerra um título de vez.
 
@@ -143,9 +157,9 @@ Tela para subir um arquivo CSV com os títulos de cobrança.
 
 **Como funciona o upload (duas etapas — prévia e confirmação):**
 
-1. Você seleciona o arquivo `.csv`. O sistema mostra um preview local instantâneo (linhas detectadas e separador).
+1. Você arrasta o arquivo `.csv` para a tela ou clica para escolher. O sistema mostra um preview local instantâneo (linhas detectadas e separador). Planilha do Excel (`.xlsx`) é recusada na hora, com a instrução de salvar como CSV; `.txt` com separador é aceito.
 2. Ao clicar em **"Analisar planilha"**, o arquivo é processado no servidor — mas **nada é gravado no banco ainda**. Essa etapa é só leitura: valida cada linha, detecta duplicatas contra o que já existe no sistema e monta uma prévia.
-3. A prévia mostra: quantos títulos estão prontos pra importar, quantas duplicatas e linhas ignoradas, quais colunas foram identificadas, o separador detectado, e uma **análise financeira** do que seria importado (quanto já está vencido, quanto vence em até 3 dias, quanto é vencimento futuro).
+3. A prévia mostra: quantos títulos estão prontos pra importar, quantas duplicatas e linhas ignoradas, quais colunas foram identificadas, o separador detectado, uma **análise financeira** do que seria importado (quanto já está vencido, quanto vence em até 3 dias, quanto é vencimento futuro) e uma **amostra das primeiras linhas como o sistema as leu** — cliente, telefone, valor e vencimento. A amostra é o lugar de perceber, antes de gravar, um valor ou uma data lidos errado.
 4. Você revisa e só então clica em **"Confirmar importação"** — é nesse momento que clientes e títulos são de fato gravados no banco. A checagem de duplicata é refeita nesse passo por segurança.
 5. O relatório final mostra quantos títulos foram importados, duplicatas ignoradas e eventuais erros de gravação.
 
@@ -238,12 +252,12 @@ Maria Souza,21988880000,320,2026-08-20
 
 ### 4. Histórico do Cliente (`/clientes/[id]`)
 
-Tela acessada ao clicar no nome de um cliente na lista do dia. Mostra:
+Tela acessada ao clicar no nome de um cliente na lista do dia. É só de consulta — o resultado se registra na lista do dia. Mostra:
 
-- Nome, telefone e totais (quanto está em aberto e quanto já foi pago).
+- Nome, telefone, último contato e totais (quanto está em aberto e quanto já foi pago).
 - Todos os títulos do cliente, do mais recente para o mais antigo.
-- Para cada título: valor, data de vencimento, status atual e (se houver) data de promessa de pagamento.
-- **Linha do tempo de interações** de cada título: data/hora, mensagem enviada e resultado registrado.
+- Para cada título: valor, data de vencimento, situação atual com data ("pago em 21/09", "promessa para 30/09", "sem resposta · volta em 26/09") e, se ainda é devido, a urgência na mesma escala de cor da fila.
+- **Linha do tempo de interações** de cada título: data e hora, resultado registrado e mensagem enviada.
 
 ---
 
@@ -267,7 +281,9 @@ Painel administrativo com visão geral do banco de dados e opções de limpeza. 
 | Limpar títulos pagos | **Apenas** títulos já pagos, com o histórico de interações deles. Títulos aguardando follow-up (promessa ou sem resposta) são preservados — continuam sendo dívida em aberto. |
 | Limpar tudo | Remove absolutamente todos os dados (clientes, títulos, interações). O sistema volta ao estado inicial. |
 
-> ⚠️ Ambas as ações são **irreversíveis**. Há uma etapa de confirmação antes de executar.
+> ⚠️ Ambas as ações são **irreversíveis**. Há uma etapa de confirmação antes de executar, que diz
+> exatamente o que vai sumir ("Remove 11 clientes, 11 títulos e 3 interações"). **Limpar tudo**
+> só libera o botão depois que você digita `EXCLUIR TUDO`.
 >
 > Atenção ao "Limpar títulos pagos": apagar um título pago também apaga o registro de que ele foi
 > recuperado, então o valor sai da apuração dos últimos 30 dias. Use com parcimônia se quiser
@@ -401,7 +417,7 @@ uma cobrança nova.
 | Banco de dados | Supabase (PostgreSQL) com RLS habilitado, acessado só pelo servidor |
 | Parse de CSV | PapaParse |
 | Autenticação | E-mail + senha (credencial única) · cookie HTTP-only assinado (HMAC-SHA256), verificado no Proxy |
-| Testes | Vitest — 218 casos em 9 arquivos: domínio, política de I/O, sessão e leitura de resposta no navegador |
+| Testes | Vitest — 246 casos em 11 arquivos: domínio, política de I/O, sessão, leitura de resposta no navegador e formatação de exibição |
 
 ---
 
@@ -507,7 +523,7 @@ Tudo abaixo roda em repositório recém-clonado, **sem `.env.local` e sem Supaba
 
 ```bash
 npm install
-npm run test        # 9 arquivos, 218 casos — deve passar em ~2s
+npm run test        # 11 arquivos, 246 casos — deve passar em ~2s
 npm run lint        # sem saída = sem problema
 npx tsc --noEmit    # sem saída = sem erro de tipo
 npm run build       # build de produção completo
@@ -516,8 +532,8 @@ npm run build       # build de produção completo
 Saída esperada do `npm run test`:
 
 ```
- Test Files  9 passed (9)
-      Tests  218 passed (218)
+ Test Files  11 passed (11)
+      Tests  246 passed (246)
 ```
 
 ### 1. Testes automatizados
@@ -605,18 +621,24 @@ estado uns para os outros.
 
 #### Cenário 1 — Fluxo completo
 
-1. Vá em **"+ Importar CSV"** e selecione `teste_varejo.csv`.
+1. Clique em **"Importar planilha"**, na barra superior, e arraste ou selecione `teste_varejo.csv`.
 2. Clique em **"Analisar planilha"**. Confira a prévia contra a tabela da seção anterior:
-   11 prontos, 2 ignorados, separador `;`, colunas identificadas. **Nada foi gravado ainda.**
-3. Clique em **"Confirmar importação"** → o relatório deve informar 11 títulos importados.
+   11 prontos, 2 ignorados, separador `;`, colunas identificadas, e a amostra com os valores e as
+   datas lidos. **Nada foi gravado ainda.**
+3. Clique em **"Confirmar importação de 11 títulos"** → o relatório deve informar 11 títulos
+   importados.
 4. Vá para a **Lista do dia** e confira que os clientes aparecem na seção correta e ordenados por
    prioridade (maior `dias × valor` no topo, entre os vencidos).
 5. Expanda uma linha → a mensagem deve citar o primeiro nome, o valor formatado em R$ e os dias de
    atraso. Cliente com mais de um título deve ter **uma** mensagem consolidada citando todos.
-6. Clique em **enviar pelo WhatsApp** → abre o WhatsApp Web/app com o texto preenchido.
-7. Volte ao Atlas e registre **"Pago"** num título → aquele título some; a linha do cliente
-   continua se ele ainda tiver outros.
-8. Registre **"Prometeu pagar"** → deve pedir uma data antes de confirmar.
+6. Clique em **enviar pelo WhatsApp** → abre o WhatsApp Web/app com o texto preenchido. De volta ao
+   Atlas, a linha passa a dizer **"Contatado hoje às HH:MM"**, e o cabeçalho da seção, quantos já
+   foram contatados hoje.
+7. Registre **"Pago"** num título → a tela pede confirmação dizendo o valor. Confirme → aquele
+   título some, e um aviso no canto confirma o registro; a linha do cliente continua se ele ainda
+   tiver outros.
+8. Registre **"Prometeu pagar"** → deve pedir uma data antes de confirmar, e recusar data no
+   passado.
 9. Registre **"Sem resposta"** → some sem pedir data.
 
 ✅ **Passou se:** os números do relatório batem com a prévia, a ordenação respeita a prioridade e
@@ -654,8 +676,12 @@ cada resultado registrado remove só o título certo.
 
 #### Cenário 5 — Ciclo de vida: nada some sem ser pago
 
-1. Registre **"Prometeu pagar"** num título com a data de **ontem**.
-2. Recarregue a lista do dia → o título **reaparece**, marcado com "prometeu e não pagou".
+1. Registre **"Prometeu pagar"** num título com a data de **hoje** → ele **continua na lista**,
+   marcado "promessa para hoje": a data chegou, e o título fica à vista para você conferir o
+   pagamento. (A tela não aceita data no passado.)
+2. Para ver uma promessa **quebrada** sem esperar, registre para amanhã e ajuste `data_promessa`
+   direto no banco para ontem. Recarregue a lista → o título **reaparece**, marcado "promessa de
+   DD/MM vencida".
 3. Registre **"Sem resposta"** → sai da lista. Ele volta sozinho em 3 dias (para conferir sem
    esperar, ajuste `silenciado_ate` direto no banco).
 4. Registre **"Pago"** → sai da lista e **não volta mais**.
@@ -666,8 +692,10 @@ cada resultado registrado remove só o título certo.
 #### Cenário 6 — Limpeza de dados
 
 1. Acesse **"Dados"** e confira os números contra o que você importou.
-2. **"Limpar títulos pagos"** → só os pagos somem; promessa e sem resposta permanecem.
-3. **"Limpar tudo"** → o sistema volta ao estado inicial.
+2. **"Limpar títulos pagos"** → a confirmação diz quantos títulos saem; só os pagos somem, e
+   promessa e sem resposta permanecem.
+3. **"Limpar tudo"** → o botão só libera depois que você digita `EXCLUIR TUDO`; o sistema volta ao
+   estado inicial.
 
 ✅ **Passou se:** a limpeza parcial preserva o que ainda é dívida em aberto.
 
@@ -738,7 +766,7 @@ correto: zero seria uma afirmação falsa sobre dinheiro.
 
 | # | Verificação | Como |
 |---|---|---|
-| 1 | Suíte automatizada verde | `npm run test` → 218/218 |
+| 1 | Suíte automatizada verde | `npm run test` → 246/246 |
 | 2 | Lint e tipos limpos | `npm run lint` · `npx tsc --noEmit` |
 | 3 | Build de produção | `npm run build` |
 | 4 | Login exigido em toda rota | Cenário 0 |

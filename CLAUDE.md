@@ -196,7 +196,7 @@ novo.
 | Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
 | Parse de CSV | PapaParse | ^5.5.4 |
 | Lint | ESLint | ^9, `eslint-config-next` |
-| Testes | Vitest | ^4 — 218 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
+| Testes | Vitest | ^4 — 246 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
 
 ### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
 
@@ -216,16 +216,25 @@ npm run dev     # servidor de desenvolvimento (localhost:3000)
 npm run build   # build de produção
 npm run start   # serve o build de produção
 npm run lint    # ESLint
-npm run test    # vitest — 218 casos, todos em src/lib/
+npm run test    # vitest — 246 casos, todos em src/lib/
 ```
 
-**O que tem cobertura** (`src/lib/*.test.ts`, 218 casos): `prioridade.ts` (score, categorização,
+**O que tem cobertura** (`src/lib/*.test.ts`, 246 casos): `prioridade.ts` (score, categorização,
 reentrada), `csv-import.ts` (parsing, validação, planejamento do lote, deduplicação),
 `recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor),
 `importacao.ts` (máquina de estados de conflito), `sessao.ts` (assinatura, expiração e recusa de
 cookie forjado), `rate-limit.ts` (janela, reinício e expurgo de entradas velhas), `credenciais.ts`
-(normalização de e-mail e derivação do segredo de sessão) e `resposta-http.ts` (como o navegador
-lê a resposta de uma rota: sessão expirada, queda de rede, corpo que não é JSON).
+(normalização de e-mail e derivação do segredo de sessão), `resposta-http.ts` (como o navegador
+lê a resposta de uma rota: sessão expirada, queda de rede, corpo que não é JSON), `format.ts`
+(plural, datas sem fuso, `timestamp` do banco lido como UTC, rótulo de vencimento) e `contato.ts`
+(último contato por cliente, o rótulo "hoje às 10:32" e o de retorno à fila).
+
+**Validação visual existe**, fora da suíte: não há teste de componente, mas a interface pode ser
+exercitada num navegador real (Edge headless controlado por `puppeteer-core` instalado fora do
+projeto). Mudança de UI se valida assim — captura em desktop e em 375px, e o fluxo clicado —, não
+só com `tsc` e lint. Ao validar, **não grave dado de verdade**: nada de marcar pago, confirmar
+importação ou limpar dados; se precisar gravar para ver um fluxo, use um cliente de teste e diga
+qual e o que mudou.
 
 **O que NÃO tem cobertura, e precisa de verificação manual**: rotas de API, Server Actions,
 componentes React, o encadeamento HTTP entre UI e backend, comportamento sob dependência
@@ -241,17 +250,21 @@ admitir a lacuna.
 
 ```
 src/
-├── app/             # rotas (App Router) + API routes em app/api/*/route.ts
+├── app/             # rotas (App Router) + API routes em app/api/*/route.ts; na raiz,
+│                    #   loading, error, not-found e icon.svg
 ├── components/       # componentes de UI ('use client' onde há interação)
-│   ├── ui/             # primitivas (Botao, BotaoIcone, Badge, Icone, KpiCard)
+│   ├── ui/             # primitivas: Pagina, CabecalhoPagina, Painel, Aviso, KpiCard, Badge,
+│   │                   #   Botao (+ estiloBotao), BotaoIcone, Icone
 │   ├── FilaCobranca.tsx  # a fila do dia como tabela
 │   ├── ClienteLinha.tsx  # uma linha = um cliente; expande para os títulos
+│   ├── Avisos.tsx      # avisos flutuantes (provedor no layout, `useAvisos`)
 │   └── Marca.tsx       # símbolo + wordmark
 ├── lib/
 │   ├── prioridade.ts   # domínio puro: urgência, score, fila do dia, agrupamento
 │   ├── templates.ts    # domínio puro: texto das mensagens
 │   ├── csv-import.ts   # domínio puro: parsing, validação, planejamento do lote
-│   ├── format.ts       # domínio puro: formatarMoeda
+│   ├── format.ts       # exibição pura: moeda, plural, datas, `instanteDoBanco`, rótulo de vencimento
+│   ├── contato.ts      # exibição pura: último contato por cliente e "hoje às 10:32"
 │   ├── importacao.ts   # gravação do lote (conflito/conciliação) — I/O injetado, sem importar supabase
 │   ├── recuperacao.ts  # misto: apuração pura + uma leitura
 │   ├── supabase-io.ts  # POLÍTICA de I/O: prazo, classificação de falha, paginação
@@ -301,11 +314,20 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
   de caçar classe em quinze. A paleta `slate`/`blue`/`emerald` do Tailwind **saiu do código** —
   reintroduzi-la quebra o sistema em silêncio, porque a cor continua funcionando e só a
   consistência morre.
-- **A cor do domínio é gramática, não estética.** `risco` = vencido, `atencao` = vence em breve,
-  `marca` = pago/recuperado. O usuário lê a fila por cor antes de ler o texto. Os tons são
-  dessaturados de propósito: vermelho vivo numa lista inteira de inadimplentes vira ruído e para
-  de significar urgência. `Badge` + `tomDaCategoria` (`components/ui/Badge.tsx`) são a fonte única
-  da tradução categoria → cor.
+- **A cor do domínio é gramática, não estética — e é uma ESCALA de urgência, a mesma em toda
+  tela.** `risco` = atraso longo (mais de 7 dias), `atencao` = atraso leve (1 a 7 dias), **neutro =
+  a vencer** e estados sem urgência própria (promessa, sem resposta), `marca` = pago/recuperado.
+  Fora da fila, `risco` é erro que impede a operação e `atencao` é cuidado (duplicata, prévia
+  ainda não gravada). O usuário lê a fila por cor antes de ler o texto. Os tons são dessaturados
+  de propósito: vermelho vivo numa lista inteira de inadimplentes vira ruído e para de significar
+  urgência. `Badge` + `tomDaCategoria` (`components/ui/Badge.tsx`) são a fonte única da tradução
+  categoria → cor. (Até 2026-09-23 esta linha dizia "`atencao` = vence em breve", enquanto a tabela
+  aprovada pintava de âmbar o atraso leve; valeu a tela, e o texto foi corrigido.) Verde em
+  "R$ 0,00" não: zero não é conquista.
+- **`texto-fraco` passa no contraste AA** (5,00:1 sobre branco, 4,62:1 sobre `linha-hover`), mas
+  **não sobre `superficie-afundada`** (4,42:1). Texto pequeno colorido usa o degrau 700: o
+  `atencao-600` fica em 4,45:1. Cor nova de texto se mede antes de entrar — o valor anterior do
+  token media 2,55:1 e reprovava em trinta e um lugares.
 - **Verde é a marca E significa "pago" — não é colisão.** O Atlas existe para recuperar dinheiro,
   então marca e sucesso são a mesma ideia; o contexto desambigua (badge verde = pago, botão verde
   = ação primária). Não crie um segundo verde para "resolver" isso.
@@ -325,7 +347,30 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
   largura de dígito fixa a coluna de valores muda de largura a cada render e fica impossível
   comparar de relance, que é a tarefa do usuário na lista do dia.
 - **Botão e etiqueta vêm de `components/ui/`**, com variante por PAPEL (`primario`, `secundario`,
-  `sutil`, `perigo`), não por cor. Só um `primario` por bloco.
+  `sutil`, `perigo`), não por cor. Só um `primario` por bloco. `Link` do Next com cara de botão usa
+  `estiloBotao(variante, tamanho)` — não copie a lista de classes. Botão que espera o servidor usa
+  `carregando`, não esmaece.
+- **Toda tela depois do login é `Pagina` + `CabecalhoPagina`** (o único `h1`), com `Painel` para
+  blocos e `Aviso` para mensagens. O login tem layout próprio, centralizado e sem barra. Emoji não
+  é ícone: os ícones vêm de `components/ui/Icone.tsx`, no grid de 16. `font-mono` direto só em
+  texto técnico — nome de coluna em `<code>`, a frase que se digita para confirmar —; dinheiro e
+  telefone usam `.numero`.
+- **Ação sem volta pede confirmação que diz o que vai acontecer, com o valor.** "Pago" é o único
+  estado terminal e a interface não oferece desfazer: pede um segundo clique, em outro lugar da
+  tela, dizendo o valor. "Limpar tudo" pede a frase digitada. Promessa e sem resposta não pedem —
+  são pausas. Esc cancela.
+- **Confirmação de registro vai para `useAvisos`, não para dentro da linha.** A Server Action
+  revalida a página e o título registrado sai da fila na hora; com o único título do cliente, a
+  linha inteira some — e qualquer mensagem desenhada nela some junto.
+- **Rótulo que depende do relógio ("hoje", "há 3 dias") é calculado no servidor** e entregue
+  pronto ao componente. Calculado no navegador, servidor e navegador podem discordar sobre o fuso
+  e a hidratação quebra. "Hoje" é o relógio do servidor, o mesmo de `calcularDiasAtraso`.
+- **Hora de coluna `timestamp` passa por `instanteDoBanco`** (`lib/format.ts`). `data_envio` e
+  `criado_em` não têm fuso e vêm sem `Z`; `new Date()` direto as lê como hora local e adianta três
+  horas (medido, ver §Descobertas empíricas).
+- **Celular não rola na horizontal.** Tabela que não cabe esconde colunas secundárias e desce
+  valor e prazo para baixo do nome; ação principal (WhatsApp) sempre visível. Dinheiro não
+  divide largura com outro card no celular — cortado ("R$ 10.56…") não serve.
 - **`'use client'` só onde há estado/interação** (formulários, botões com handler). Páginas que só
   leem e renderizam são Server Components por padrão.
 - **Chamada de API a partir do navegador passa por `chamarApi`** (`lib/resposta-http.ts`), nunca
@@ -524,6 +569,8 @@ de agir — mas meça.
 | Sem `AbortSignal`, o padrão do undici deixa um fetch pendurado (>20s medido; documentado 300s) | Prazos explícitos em `supabase-io.ts` |
 | `postgrest-js` repete só GET/HEAD/OPTIONS, 3× com backoff 1s/2s/4s | Leitura ganha teto de tempo; escrita não ganha retry |
 | Sem sessão, o proxy redireciona **também as rotas de API** para `/login` (307), e o `fetch` do navegador segue: `GET /api/dados` termina em **200 com HTML**; `POST /api/upload-csv` termina em **404 "Server action not found."** em texto | Chamada de API no navegador passa por `lib/resposta-http.ts`, que olha o desvio para o login **antes** do status |
+| `interacoes.data_envio` é `timestamp` **sem fuso**, gravado em UTC; o PostgREST devolve `"2026-09-21T10:21:49.650311"`, sem `Z`, e `new Date()` lê como hora **local**. Medido contra um `resolvido_em` (timestamptz) gravado no mesmo instante: `10:21:49+00:00` | Exibição passa por `instanteDoBanco`; o histórico mostrava as horas três horas adiantadas |
+| `revalidatePath` dentro de Server Action atualiza a tela **na hora** (doc do Next 16, confirmado no navegador): o título registrado sai da fila, e a linha do cliente some se era o único | Confirmação de registro mora em `components/Avisos.tsx`, no layout, fora da fila |
 
 ## Fora de escopo por decisão (não implementar sem pedido explícito)
 
@@ -534,6 +581,9 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
 - Envio automático de WhatsApp via API oficial. O `wa.me` manual resolve com fricção aceitável.
 - IA para priorização ou geração de mensagem. Não há volume de dado para aprender nada, e a
   fórmula atual não foi provada insuficiente.
+- **Desfazer "pago" pela UI.** É edição de título (item abaixo) e mexe em `resolvido_em`, que
+  sustenta a apuração de recuperado. A mitigação escolhida é a confirmação com o valor antes de
+  gravar (ver §Convenções), não o desfazer depois.
 - Notificações/lembretes agendados, exportação de relatórios, edição de cliente/título pela UI,
   integrações com ERP, paginação **de UI** da lista do dia (quantos cards mostrar por vez — não
   confundir com paginar a *leitura*, que passou a ser obrigatória, ver §Leitura de listas).
@@ -603,6 +653,11 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   O comportamento sem `APP_PASSWORD` espelha `proxy.ts` de propósito (dev libera, produção recusa);
   divergir criaria página que abre com botões que não funcionam.
 - Comparação de senha em `api/login/route.ts` usa `crypto.timingSafeEqual` (constant-time).
+- **`POST /api/logout` é pública no proxy, de propósito** — só apaga o cookie de quem chama. Com
+  ela protegida, "Sair" com a sessão vencida caía num 404 em texto. É POST, nunca GET (o prefetch
+  do `Link` dispararia um link de saída). O nome do cookie é `COOKIE_SESSAO` (`lib/sessao.ts`),
+  usado por quem grava, valida e apaga — não reescreva o literal.
+- `/icon.svg` fica fora do `matcher` do proxy, como o favicon: é arte estática.
 - Login tem rate limiting em memória (10 tentativas / 5 min / IP), com a mecânica em
   `lib/rate-limit.ts` — não sobrevive a restart nem é compartilhado entre instâncias; ok para o
   deploy de instância única atual, revisar se isso mudar. As entradas expiradas são expurgadas:
@@ -625,6 +680,12 @@ de commit; ele envelheceu em dias e só servia para induzir erro.
 
 Único fato histórico que vale guardar: se um `src/middleware.ts` vazio reaparecer, ele conflita com
 `src/proxy.ts` (o arquivo real e funcional no Next 16) e deve ser removido — já aconteceu antes.
+
+E o caso oposto, que parece o mesmo e não é: **editar `src/proxy.ts` com o `next dev` no ar faz o
+servidor responder 500 em toda rota com `Could not parse module '[project]/src/middleware.ts',
+file not found`**. Não falta arquivo nenhum — é o recarregamento do Turbopack (Next 16.2.12).
+Reinicie o `next dev`. **Não crie `src/middleware.ts` para "resolver"**: ele conflitaria com o
+proxy. Reproduzido duas vezes em 2026-09-23.
 
 ---
 

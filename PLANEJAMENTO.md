@@ -113,7 +113,7 @@ nem coluna.
 **Gravação sob conflito**: `src/lib/importacao.ts` — máquina de estados com I/O injetado
 (`Portas`), traduz SQLSTATE 23505 como duplicata e concilia contra o banco antes de reportar perda.
 
-**Testes**: 218 casos, todos em `src/lib/` (eram ~143 quando esta seção foi escrita, em
+**Testes**: 246 casos, todos em `src/lib/` (eram ~143 quando esta seção foi escrita, em
 2026-08-12). Rotas, Server Actions e componentes seguem sem cobertura; a verificação deles é
 manual.
 
@@ -603,6 +603,7 @@ valendo para tudo o mais:
 | 2026-09-19 | Identidade visual própria (`globals.css`, `components/ui/`, `Marca.tsx`) | Trabalho desbloqueado sem usuários, e a tela faz parte da conversa que vai buscar os arquivos da Fase 0. O fluxo de `/upload` foi só repaginado, não redesenhado — a tela de mapeamento é o centro da Fase 1 |
 | 2026-09-19 | Login com **e-mail + senha** (`APP_EMAIL`) | Credencial de duas partes, não contas de usuário. **Não altera o §5.7**: segue mono-empresa, sem cadastro e sem auditoria |
 | 2026-09-23 | Falhas silenciosas das chamadas à API no navegador (`src/lib/resposta-http.ts`, login, `/upload`, `/dados`) | Defeito presente: sem sessão, a análise da importação travava, o erro da confirmação sumia e `/dados` mostrava os botões de exclusão sem ter lido os números. Não toca em ingestão, validação nem schema |
+| 2026-09-23 | **Trilha de evolução de UI/UX** enquanto os CSVs reais da Fase 0 não chegam: todas as telas no sistema visual, contraste AA, celular, sair, último contato na fila, confirmação do "pago", título por aba, carregamento/erro/404 | Pedido explícito do usuário: "o produto por enquanto vai ser adiantado no front end". **Fronteira respeitada**: nenhuma mudança em ingestão, validação, schema ou regra de domínio; `/upload` só repaginado — a tela de mapeamento continua sendo da Fase 1. No servidor, só a rota `/api/logout` e a leitura de `interacoes(data_envio)` na home |
 
 **A restrição do §5.3 continua de pé onde importa**: nenhuma convenção de milhar/decimal foi
 escolhida por célula. A correção estrutural (decidir por coluna, com confirmação) segue sendo da
