@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { sessaoValida } from '@/lib/sessao';
+import { COOKIE_SESSAO, sessaoValida } from '@/lib/sessao';
 import { credenciaisDoAmbiente, segredoDeSessao } from '@/lib/credenciais';
 
-const PUBLIC_PATHS = ['/login', '/api/login'];
+// `/api/logout` é pública porque só APAGA o cookie de quem chama — não lê nem
+// grava dado. Protegida, ela falharia justamente com a sessão já expirada: o
+// proxy devolveria o POST para /login, e o navegador mostraria o 404 em texto
+// que o Next responde a POST numa página.
+const PUBLIC_PATHS = ['/login', '/api/login', '/api/logout'];
 
 // O Proxy do Next 16 roda no runtime Node.js por padrão (e definir `runtime`
 // aqui lança erro), então `node:crypto` — usado por lib/sessao.ts — está
@@ -41,7 +45,7 @@ export function proxy(request: NextRequest) {
   // emitiu.
   const isAuthenticated = sessaoValida(
     segredoDeSessao(credenciais),
-    request.cookies.get('atlas_auth')?.value,
+    request.cookies.get(COOKIE_SESSAO)?.value,
   );
 
   if (!isAuthenticated) {

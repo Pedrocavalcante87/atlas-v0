@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
-import { criarValorDeSessao, DURACAO_SESSAO_MS } from '@/lib/sessao';
+import { COOKIE_SESSAO, criarValorDeSessao, DURACAO_SESSAO_MS } from '@/lib/sessao';
 import { criarLimitador } from '@/lib/rate-limit';
 import { credenciaisDoAmbiente, normalizarEmail, segredoDeSessao } from '@/lib/credenciais';
 
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
   // para não divergirem. O segredo deriva do e-mail E da senha, então trocar
   // qualquer um dos dois encerra as sessões abertas.
   const response = NextResponse.json({ ok: true });
-  response.cookies.set('atlas_auth', criarValorDeSessao(segredoDeSessao(credenciais)), {
+  response.cookies.set(COOKIE_SESSAO, criarValorDeSessao(segredoDeSessao(credenciais)), {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
