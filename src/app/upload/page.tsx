@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { formatarMoeda as moeda } from '@/lib/format';
+import { chamarApi, mensagemDeFalha, type FalhaDeResposta } from '@/lib/resposta-http';
 
 interface BreakdownGroup {
   count: number;
@@ -57,6 +58,38 @@ interface FilePreview {
   separador: string;
 }
 
+/** O 503 da confirmação traz o relatório do que chegou a ser gravado. */
+function ehRelatorio(dados: unknown): dados is ConfirmResult {
+  return (
+    dados !== null &&
+    typeof dados === 'object' &&
+    typeof (dados as { resultado?: unknown }).resultado === 'string'
+  );
+}
+
+// A confirmação GRAVA, então cada falha precisa dizer o que pode ter
+// acontecido com o banco — "tente de novo" sem isso convida a importar duas
+// vezes sem saber se a primeira entrou (é seguro, mas o usuário não sabe).
+function textoFalhaConfirmacao(falha: FalhaDeResposta): string {
+  switch (falha.tipo) {
+    case 'sessao_expirada':
+      // O proxy barrou a requisição antes da rota: nada foi gravado.
+      return 'Sua sessão expirou antes da confirmação. Nada foi gravado: entre de novo e importe o arquivo outra vez.';
+    case 'sem_conexao':
+      return (
+        'Não foi possível falar com o servidor, e não há como saber se a importação chegou a começar. ' +
+        'Confira a lista do dia; importar o mesmo arquivo de novo é seguro, porque o que já entrou é reconhecido como duplicata.'
+      );
+    case 'invalida':
+      return (
+        `${mensagemDeFalha(falha, '')} Confira a lista do dia antes de tentar de novo; ` +
+        'importar o mesmo arquivo outra vez não duplica títulos.'
+      );
+    case 'erro':
+      return mensagemDeFalha(falha, 'Erro ao confirmar importação.');
+  }
+}
+
 function analisarCSVLocal(text: string): FilePreview {
   const primeiraLinha = text.split('\n')[0] ?? '';
   const separador = primeiraLinha.includes(';')
@@ -76,6 +109,7 @@ export default function UploadPage() {
   const [confirmResult, setConfirmResult] = useState<ConfirmResult | null>(null);
   const [confirmando, setConfirmando] = useState(false);
   const [error, setError] = useState('');
+  const [sessaoExpirada, setSessaoExpirada] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -84,8 +118,14 @@ export default function UploadPage() {
     setResult(null);
     setConfirmResult(null);
     setError('');
-    const text = await selectedFile.text();
-    setPreview(analisarCSVLocal(text));
+    setSessaoExpirada(false);
+    // A leitura local é só uma prévia informativa; se o navegador não
+    // conseguir ler o arquivo, a análise no servidor ainda decide.
+    try {
+      setPreview(analisarCSVLocal(await selectedFile.text()));
+    } catch {
+      setPreview(null);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -93,19 +133,24 @@ export default function UploadPage() {
     if (!file) return;
     setLoading(true);
     setError('');
+    setSessaoExpirada(false);
     setResult(null);
     setConfirmResult(null);
 
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await fetch('/api/upload-csv', { method: 'POST', body: formData });
-    const data = await res.json();
+    // Antes: `await res.json()` sem tratamento. Sem sessão, a resposta é um
+    // 404 em texto puro (ver lib/resposta-http.ts), o parse lançava e o botão
+    // ficava em "Analisando..." para sempre. A análise nunca grava nada, então
+    // qualquer falha aqui é segura de repetir.
+    const leitura = await chamarApi<PreviewResult>('/api/upload-csv', { method: 'POST', body: formData });
 
-    if (!res.ok) {
-      setError(data.error ?? 'Erro desconhecido.');
+    if (leitura.tipo === 'ok') {
+      setResult(leitura.dados);
     } else {
-      setResult(data);
+      setError(mensagemDeFalha(leitura, 'Não foi possível analisar o arquivo.'));
+      setSessaoExpirada(leitura.tipo === 'sessao_expirada');
     }
     setLoading(false);
   }
@@ -113,21 +158,27 @@ export default function UploadPage() {
   async function handleConfirmar() {
     if (!result) return;
     setConfirmando(true);
+    setError('');
+    setSessaoExpirada(false);
 
-    const res = await fetch('/api/upload-csv/confirmar', {
+    const leitura = await chamarApi<ConfirmResult>('/api/upload-csv/confirmar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ linhas: result.linhasValidas }),
     });
-    const data = await res.json().catch(() => null);
 
     // 503 com `resultado` é indisponibilidade da dependência, não CSV inválido:
     // o relatório existe e pode até ter linhas gravadas antes da queda, então
     // vai para a tela de resultado (em vermelho), não para o erro de formulário.
-    if (data?.resultado) {
-      setConfirmResult(data);
-    } else if (!res.ok) {
-      setError(data?.error ?? 'Erro ao confirmar importação.');
+    if (leitura.tipo === 'ok') {
+      setConfirmResult(leitura.dados);
+    } else if (leitura.tipo === 'erro' && ehRelatorio(leitura.dados)) {
+      setConfirmResult(leitura.dados);
+    } else {
+      // Este erro aparece NA PRÉVIA. Antes ele ia para um aviso que só existia
+      // no formulário inicial: o usuário clicava em confirmar e nada acontecia.
+      setError(textoFalhaConfirmacao(leitura));
+      setSessaoExpirada(leitura.tipo === 'sessao_expirada');
     }
     setConfirmando(false);
   }
@@ -135,6 +186,8 @@ export default function UploadPage() {
   function reiniciar() {
     setResult(null);
     setConfirmResult(null);
+    setError('');
+    setSessaoExpirada(false);
     setFile(null);
     setPreview(null);
     if (inputRef.current) inputRef.current.value = '';
@@ -157,6 +210,8 @@ export default function UploadPage() {
       ) : result ? (
         <PreviewReport
           result={result}
+          erro={error}
+          sessaoExpirada={sessaoExpirada}
           confirmando={confirmando}
           onConfirmar={handleConfirmar}
           onCancelar={reiniciar}
@@ -229,12 +284,7 @@ export default function UploadPage() {
                 </div>
               )}
 
-              {error && (
-                <div className="bg-risco-50 border border-risco-200 rounded-md p-3.5 flex gap-2.5 text-base text-risco-700">
-                  <span className="shrink-0">&#9888;&#65039;</span>
-                  <span className="whitespace-pre-wrap">{error}</span>
-                </div>
-              )}
+              {error && <ErroNaTela erro={error} sessaoExpirada={sessaoExpirada} />}
 
               <button
                 type="submit"
@@ -291,13 +341,33 @@ export default function UploadPage() {
 // ---------------------------------------------------------------------------
 // Prévia — mostra o que SERIA importado, mas ainda não gravou nada.
 // ---------------------------------------------------------------------------
+function ErroNaTela({ erro, sessaoExpirada }: { erro: string; sessaoExpirada: boolean }) {
+  return (
+    <div role="alert" className="bg-risco-50 border border-risco-200 rounded-md p-3.5 flex gap-2.5 text-base text-risco-700">
+      <span className="shrink-0">&#9888;&#65039;</span>
+      <div>
+        <span className="whitespace-pre-wrap">{erro}</span>
+        {sessaoExpirada && (
+          <Link href="/login" className="block mt-1.5 font-semibold underline">
+            Entrar de novo
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PreviewReport({
   result,
+  erro,
+  sessaoExpirada,
   confirmando,
   onConfirmar,
   onCancelar,
 }: {
   result: PreviewResult;
+  erro: string;
+  sessaoExpirada: boolean;
   confirmando: boolean;
   onConfirmar: () => void;
   onCancelar: () => void;
@@ -427,6 +497,8 @@ function PreviewReport({
           ))}
         </div>
       )}
+
+      {erro && <ErroNaTela erro={erro} sessaoExpirada={sessaoExpirada} />}
 
       <div className="flex gap-3">
         {result.count > 0 && (
