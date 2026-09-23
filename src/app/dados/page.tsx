@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { formatarMoeda } from '@/lib/format';
+import { chamarApi, mensagemDeFalha, type FalhaDeResposta } from '@/lib/resposta-http';
 
 interface Stats {
   clientes: number;
@@ -17,10 +18,32 @@ interface Stats {
   janelaRecuperacaoDias: number;
 }
 
+/** Por que os números não estão na tela — e se "tentar de novo" resolve. */
+interface FalhaDeLeitura {
+  mensagem: string;
+  sessaoExpirada: boolean;
+}
+
+// A exclusão é irreversível: cada falha diz o que se sabe sobre o que foi
+// apagado. Só a sessão expirada permite afirmar "nada foi removido" — o proxy
+// barrou a requisição antes da rota.
+function textoFalhaExclusao(falha: FalhaDeResposta): string {
+  switch (falha.tipo) {
+    case 'sessao_expirada':
+      return 'Sua sessão expirou. Nada foi removido: entre de novo para continuar.';
+    case 'sem_conexao':
+      return 'Não foi possível falar com o servidor. Nada foi confirmado; os números abaixo mostram o estado atual.';
+    case 'invalida':
+      return `${mensagemDeFalha(falha, '')} Nada foi confirmado; confira os números abaixo.`;
+    case 'erro':
+      return mensagemDeFalha(falha, 'Não foi possível remover os dados.');
+  }
+}
+
 export default function DadosPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
-  const [indisponivel, setIndisponivel] = useState('');
+  const [falha, setFalha] = useState<FalhaDeLeitura | null>(null);
   const [confirmacao, setConfirmacao] = useState<'tudo' | 'concluidos' | null>(null);
   const [deletando, setDeletando] = useState(false);
   const [mensagem, setMensagem] = useState('');
@@ -32,23 +55,19 @@ export default function DadosPage() {
   // skeleton de novo depois de montado (recarregar após limpar dados) seta
   // explicitamente antes de chamar esta função — ver `limpar()` abaixo.
   const carregarStats = useCallback(async () => {
-    // `!res.ok` precisa ser tratado aqui: a rota agora responde 503 quando não
-    // consegue ler o banco, e o corpo é `{ error }`, não estatísticas. Sem esta
-    // checagem o objeto de erro virava `stats` e a tela renderizava
-    // "undefined"/zeros — o mesmo tipo de número inventado que a rota passou a
-    // se recusar a produzir.
-    try {
-      const res = await fetch('/api/dados', { cache: 'no-store' });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setIndisponivel(data?.error ?? 'Não foi possível carregar os dados.');
-        setStats(null);
-      } else {
-        setIndisponivel('');
-        setStats(data);
-      }
-    } catch {
-      setIndisponivel('Não foi possível falar com o servidor.');
+    // Só um 2xx com JSON vira estatística. A rota responde 503 `{ error }`
+    // quando não lê o banco, e sem sessão o proxy devolve o HTML do login COM
+    // STATUS 200 — que a versão anterior lia como "estatística nula" e, sem
+    // marcar indisponibilidade, deixava a zona de perigo na tela.
+    const leitura = await chamarApi<Stats>('/api/dados', { cache: 'no-store' });
+    if (leitura.tipo === 'ok') {
+      setFalha(null);
+      setStats(leitura.dados);
+    } else {
+      setFalha({
+        mensagem: mensagemDeFalha(leitura, 'Não foi possível carregar os dados.'),
+        sessaoExpirada: leitura.tipo === 'sessao_expirada',
+      });
       setStats(null);
     }
     setLoadingStats(false);
@@ -69,27 +88,23 @@ export default function DadosPage() {
     setMensagem('');
     setErroExclusao('');
 
-    try {
-      const res = await fetch(`/api/dados?modo=${modo}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        // "tudo" exige a frase exata que o servidor valida — ver api/dados/route.ts.
-        body: JSON.stringify(modo === 'tudo' ? { confirmacao: 'EXCLUIR TUDO' } : {}),
-      });
-      const data = await res.json().catch(() => null);
+    const leitura = await chamarApi<{ mensagem?: string }>(`/api/dados?modo=${modo}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      // "tudo" exige a frase exata que o servidor valida — ver api/dados/route.ts.
+      body: JSON.stringify(modo === 'tudo' ? { confirmacao: 'EXCLUIR TUDO' } : {}),
+    });
 
-      // Falha de exclusão NÃO pode entrar em `mensagem`: aquilo é renderizado
-      // numa caixa verde com um ✅. Uma auditoria pegou "A exclusão foi
-      // interrompida — parte dos dados pode ter sido removida" aparecendo como
-      // sucesso. É o mesmo tipo de mentira que este ciclo veio eliminar, só que
-      // sobre uma operação irreversível.
-      if (!res.ok) {
-        setErroExclusao(data?.error ?? 'Não foi possível remover os dados.');
-      } else {
-        setMensagem(data?.mensagem ?? 'Dados removidos.');
-      }
-    } catch {
-      setErroExclusao('Não foi possível falar com o servidor. Nada foi confirmado.');
+    // Falha de exclusão NÃO pode entrar em `mensagem`: aquilo é renderizado
+    // numa caixa verde com um ✅. Uma auditoria pegou "A exclusão foi
+    // interrompida — parte dos dados pode ter sido removida" aparecendo como
+    // sucesso. É o mesmo tipo de mentira que este ciclo veio eliminar, só que
+    // sobre uma operação irreversível. Pelo mesmo motivo só um 2xx com JSON
+    // conta como sucesso: o HTML do login também chega com 200.
+    if (leitura.tipo === 'ok') {
+      setMensagem(leitura.dados?.mensagem ?? 'Dados removidos.');
+    } else {
+      setErroExclusao(textoFalhaExclusao(leitura));
     }
 
     // Recarrega SEMPRE, inclusive depois de falhar: se a exclusão parou no meio,
@@ -117,24 +132,35 @@ export default function DadosPage() {
       {/* Indisponibilidade: nenhum número é melhor do que um número falso.
           Os botões de exclusão ficam escondidos enquanto não sabemos o estado
           do banco — apagar dado às cegas é a pior coisa que se pode fazer aqui. */}
-      {indisponivel && !loadingStats && (
-        <div className="bg-risco-50 border border-risco-200 rounded-md p-4 mb-6 text-base">
-          <p className="text-risco-700 font-semibold">Dados indisponíveis</p>
-          <p className="text-risco-700 text-legenda mt-1 leading-relaxed">{indisponivel}</p>
-          <button
-            onClick={() => {
-              setLoadingStats(true);
-              carregarStats();
-            }}
-            className="mt-3 text-legenda font-semibold px-3 py-1.5 rounded-lg bg-superficie border border-risco-200 text-risco-700 hover:bg-risco-100 transition-colors"
-          >
-            Tentar de novo
-          </button>
+      {falha && !loadingStats && (
+        <div role="alert" className="bg-risco-50 border border-risco-200 rounded-md p-4 mb-6 text-base">
+          <p className="text-risco-700 font-semibold">
+            {falha.sessaoExpirada ? 'Sessão expirada' : 'Dados indisponíveis'}
+          </p>
+          <p className="text-risco-700 text-legenda mt-1 leading-relaxed">{falha.mensagem}</p>
+          {falha.sessaoExpirada ? (
+            <Link
+              href="/login"
+              className="inline-block mt-3 text-legenda font-semibold px-3 py-1.5 rounded-lg bg-superficie border border-risco-200 text-risco-700 hover:bg-risco-100 transition-colors"
+            >
+              Entrar de novo
+            </Link>
+          ) : (
+            <button
+              onClick={() => {
+                setLoadingStats(true);
+                carregarStats();
+              }}
+              className="mt-3 text-legenda font-semibold px-3 py-1.5 rounded-lg bg-superficie border border-risco-200 text-risco-700 hover:bg-risco-100 transition-colors"
+            >
+              Tentar de novo
+            </button>
+          )}
         </div>
       )}
 
       {/* Stats */}
-      <div className={`grid grid-cols-2 md:grid-cols-3 gap-3 mb-6 ${indisponivel && !loadingStats ? 'hidden' : ''}`}>
+      <div className={`grid grid-cols-2 md:grid-cols-3 gap-3 mb-6 ${falha && !loadingStats ? 'hidden' : ''}`}>
         {loadingStats ? (
           Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="bg-superficie border border-borda rounded-md p-4 animate-pulse">
@@ -180,9 +206,7 @@ export default function DadosPage() {
               }
             />
           </>
-        ) : (
-          <p className="text-base text-texto-fraco col-span-3">Erro ao carregar dados.</p>
-        )}
+        ) : null}
       </div>
 
       {/* Sucesso da exclusão */}
@@ -205,14 +229,13 @@ export default function DadosPage() {
         </div>
       )}
 
-      {/* Zona de perigo — some enquanto o estado do banco é desconhecido.
-          Era possível ver "0 títulos" por falha de leitura e clicar em
-          "Limpar tudo" logo abaixo, achando que não havia nada a perder. */}
-      <div
-        className={`bg-superficie border border-borda rounded-lg overflow-hidden ${
-          indisponivel && !loadingStats ? 'hidden' : ''
-        }`}
-      >
+      {/* Zona de perigo — só existe quando os números da tela foram lidos de
+          verdade. Era possível ver "0 títulos" por falha de leitura e clicar em
+          "Limpar tudo" logo abaixo, achando que não havia nada a perder; e a
+          condição anterior (esconder só quando havia erro marcado) deixava os
+          botões na tela quando a resposta nem era das estatísticas. */}
+      {stats && !loadingStats && (
+      <div className="bg-superficie border border-borda rounded-lg overflow-hidden">
         <div className="px-5 py-4 border-b border-borda bg-superficie-sutil">
           <h3 className="text-base font-semibold text-texto">Zona de perigo</h3>
           <p className="text-legenda text-texto-fraco mt-0.5">Ações irreversíveis — não há desfazer</p>
@@ -243,6 +266,7 @@ export default function DadosPage() {
           />
         </div>
       </div>
+      )}
     </main>
   );
 }
