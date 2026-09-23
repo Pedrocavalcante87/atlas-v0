@@ -45,6 +45,7 @@ um repositório; ela impede que cada ponto de chamada invente o próprio tratame
 | **Ingestão de CSV** | `src/app/api/upload-csv/route.ts`, `src/app/api/upload-csv/confirmar/route.ts`, `src/lib/csv-import.ts`, `src/app/upload/page.tsx` | Parse, normalização, validação (prévia e confirmação), dedup e gravação de títulos importados |
 | **Domínio de priorização** | `src/lib/prioridade.ts`, `src/lib/templates.ts`, `src/types/index.ts` | Cálculo de urgência/score, agrupamento por cliente, geração de mensagens |
 | **Formatação de exibição** | `src/lib/format.ts` | `formatarMoeda`, reaproveitado por todas as telas |
+| **Leitura de resposta HTTP (navegador)** | `src/lib/resposta-http.ts` | `chamarApi` / `lerResposta`: o que as telas de login, importação e dados usam no lugar de `fetch` + `res.json()`. Classifica a resposta em ok, erro com corpo, sessão expirada (desvio para `/login`), sem conexão e corpo inválido. Nunca rejeita. A frase final é de quem chama |
 | **Lista do dia (apresentação)** | `src/app/page.tsx`, `src/components/FilaCobranca.tsx`, `src/components/ClienteLinha.tsx` | Renderiza a fila priorizada como TABELA, uma linha por cliente, e captura as ações. A linha expande para mostrar a mensagem consolidada e os títulos individuais |
 | **Histórico do cliente** | `src/app/clientes/[id]/page.tsx` | Leitura de títulos + interações de um cliente |
 | **Mutação de estado** | `src/actions/index.ts` | Server Actions: registrar envio, atualizar status de título |
@@ -73,7 +74,8 @@ está fora", e paginação. Existe porque a alternativa (repetir `if (error)` em
 justamente o que falhou: `?? 0` espalhado por `/api/dados` transformava apagão em R$ 0,00.
 
 **Onde há teste automatizado**: `prioridade.test.ts`, `csv-import.test.ts`, `recuperacao.test.ts`,
-`supabase-io.test.ts`, `importacao.test.ts`, `sessao.test.ts`, `rate-limit.test.ts`, `credenciais.test.ts`.
+`supabase-io.test.ts`, `importacao.test.ts`, `sessao.test.ts`, `rate-limit.test.ts`, `credenciais.test.ts`,
+`resposta-http.test.ts`.
 `lib/templates.ts` e `lib/format.ts` **não têm** testes. Nenhuma rota,
 Server Action ou componente React tem cobertura — a verificação deles é manual (`npm run dev`) ou
 via E2E ad-hoc.
@@ -98,6 +100,8 @@ upload/page.tsx ──▶ api/upload-csv (fetch) ──▶ lib/csv-import.ts + l
 
 dados/page.tsx ──▶ api/dados (fetch) ──▶ lib/prioridade.ts (calcularDiasAtraso)
                                       └─▶ lib/supabase-io.ts ──▶ lib/supabase.ts
+
+(todo "fetch" acima sai de lib/resposta-http.ts::chamarApi — login/page.tsx também)
 
 clientes/[id]/page.tsx ──▶ lib/format.ts + lib/supabase-io.ts ──▶ lib/supabase.ts
                        (não usa lib/prioridade.ts — exibe por data_vencimento, não por urgência,
@@ -267,8 +271,11 @@ tela está indisponível. A única exceção é `valorRecuperado`, que continua 
 mostra "—") quando o banco responde que a coluna `resolvido_em` não existe — isso é limitação
 conhecida de schema, não ausência de informação.
 
-Enquanto o estado do banco é desconhecido, a tela esconde as estatísticas **e a zona de perigo**:
-era possível ver "0 títulos" por falha de leitura e clicar em "Limpar tudo" logo abaixo.
+A zona de perigo só é desenhada quando **há estatísticas lidas e a tela não está recarregando**:
+era possível ver "0 títulos" por falha de leitura e clicar em "Limpar tudo" logo abaixo. A condição
+anterior ("esconder quando houver erro marcado") não bastava: sem sessão, `GET /api/dados` chega
+como 200 com o HTML do login, nenhum erro era marcado e os botões ficavam na tela. Sessão expirada
+tem aviso próprio, com "Entrar de novo" em vez de "Tentar de novo".
 
 ---
 
@@ -475,11 +482,11 @@ deles.
 
 - Sem camada de repositório: mudar um nome de coluna ou tabela exige busca manual em todos os
   arquivos que chamam `lib/supabase.ts`. Decisão consciente, não um descuido — ver §12.
-- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **202 casos**, todos
+- ~~Nenhum teste automatizado~~ — **parcialmente resolvido**: `npm run test`, **218 casos**, todos
   em `src/lib/`. Cobrem score e categorização (`prioridade`), parsing e planejamento do lote
   (`csv-import`), apuração (`recuperacao`), classificação de falha e paginação por cursor
-  (`supabase-io`), a máquina de estados de conflito (`importacao`) e a assinatura/expiração do
-  cookie de sessão (`sessao`).
+  (`supabase-io`), a máquina de estados de conflito (`importacao`), a assinatura/expiração do
+  cookie de sessão (`sessao`) e a leitura de resposta de API no navegador (`resposta-http`).
   **O que continua sem cobertura**: Server Actions, as rotas de API como integração, componentes
   React, o encadeamento HTTP entre UI e backend, o comportamento sob dependência indisponível e a
   concorrência real contra o Postgres. Esses seguem provados apenas por reprodução manual.

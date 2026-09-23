@@ -113,7 +113,7 @@ nem coluna.
 **Gravação sob conflito**: `src/lib/importacao.ts` — máquina de estados com I/O injetado
 (`Portas`), traduz SQLSTATE 23505 como duplicata e concilia contra o banco antes de reportar perda.
 
-**Testes**: 202 casos, todos em `src/lib/` (eram ~143 quando esta seção foi escrita, em
+**Testes**: 218 casos, todos em `src/lib/` (eram ~143 quando esta seção foi escrita, em
 2026-08-12). Rotas, Server Actions e componentes seguem sem cobertura; a verificação deles é
 manual.
 
@@ -602,6 +602,7 @@ valendo para tudo o mais:
 | 2026-09-19 | Valor ambíguo (`"1.500"`) passa a ser **recusado com motivo**, não adivinhado | Decisão do usuário. Não escolhe convenção — faz o código decidir *menos*. Ver §5.3 |
 | 2026-09-19 | Identidade visual própria (`globals.css`, `components/ui/`, `Marca.tsx`) | Trabalho desbloqueado sem usuários, e a tela faz parte da conversa que vai buscar os arquivos da Fase 0. O fluxo de `/upload` foi só repaginado, não redesenhado — a tela de mapeamento é o centro da Fase 1 |
 | 2026-09-19 | Login com **e-mail + senha** (`APP_EMAIL`) | Credencial de duas partes, não contas de usuário. **Não altera o §5.7**: segue mono-empresa, sem cadastro e sem auditoria |
+| 2026-09-23 | Falhas silenciosas das chamadas à API no navegador (`src/lib/resposta-http.ts`, login, `/upload`, `/dados`) | Defeito presente: sem sessão, a análise da importação travava, o erro da confirmação sumia e `/dados` mostrava os botões de exclusão sem ter lido os números. Não toca em ingestão, validação nem schema |
 
 **A restrição do §5.3 continua de pé onde importa**: nenhuma convenção de milhar/decimal foi
 escolhida por célula. A correção estrutural (decidir por coluna, com confirmação) segue sendo da

@@ -196,7 +196,7 @@ novo.
 | Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
 | Parse de CSV | PapaParse | ^5.5.4 |
 | Lint | ESLint | ^9, `eslint-config-next` |
-| Testes | Vitest | ^4 — 202 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
+| Testes | Vitest | ^4 — 218 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
 
 ### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
 
@@ -216,15 +216,16 @@ npm run dev     # servidor de desenvolvimento (localhost:3000)
 npm run build   # build de produção
 npm run start   # serve o build de produção
 npm run lint    # ESLint
-npm run test    # vitest — 202 casos, todos em src/lib/
+npm run test    # vitest — 218 casos, todos em src/lib/
 ```
 
-**O que tem cobertura** (`src/lib/*.test.ts`, 202 casos): `prioridade.ts` (score, categorização,
+**O que tem cobertura** (`src/lib/*.test.ts`, 218 casos): `prioridade.ts` (score, categorização,
 reentrada), `csv-import.ts` (parsing, validação, planejamento do lote, deduplicação),
 `recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor),
 `importacao.ts` (máquina de estados de conflito), `sessao.ts` (assinatura, expiração e recusa de
-cookie forjado), `rate-limit.ts` (janela, reinício e expurgo de entradas velhas) e `credenciais.ts`
-(normalização de e-mail e derivação do segredo de sessão).
+cookie forjado), `rate-limit.ts` (janela, reinício e expurgo de entradas velhas), `credenciais.ts`
+(normalização de e-mail e derivação do segredo de sessão) e `resposta-http.ts` (como o navegador
+lê a resposta de uma rota: sessão expirada, queda de rede, corpo que não é JSON).
 
 **O que NÃO tem cobertura, e precisa de verificação manual**: rotas de API, Server Actions,
 componentes React, o encadeamento HTTP entre UI e backend, comportamento sob dependência
@@ -258,6 +259,7 @@ src/
 │   ├── sessao.ts       # domínio puro: assina/valida o cookie de sessão (HMAC + expiração)
 │   ├── credenciais.ts  # e-mail + senha do ambiente e o segredo derivado das duas
 │   ├── rate-limit.ts   # domínio puro: janela de tentativas por chave, com expurgo
+│   ├── resposta-http.ts # navegador: lê resposta de API — sessão expirada, rede, corpo inválido
 │   └── *.test.ts       # vitest (npm run test)
 ├── actions/          # Server Actions ('use server')
 ├── types/            # tipos TS compartilhados
@@ -326,6 +328,13 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
   `sutil`, `perigo`), não por cor. Só um `primario` por bloco.
 - **`'use client'` só onde há estado/interação** (formulários, botões com handler). Páginas que só
   leem e renderizam são Server Components por padrão.
+- **Chamada de API a partir do navegador passa por `chamarApi`** (`lib/resposta-http.ts`), nunca
+  `fetch` + `res.json()` + `res.ok` direto. O proxy devolve a rota de API sem sessão para `/login`,
+  e o `fetch` segue o redirecionamento: o GET chega como **200 com o HTML do login**, o POST como
+  404 em texto. `res.ok` sozinho lê o HTML como sucesso, e `res.json()` sozinho lança e trava a
+  tela. `chamarApi` nunca rejeita e devolve um desfecho; a **mensagem final é de quem chama**,
+  porque só ele sabe o que a operação pode ter feito — "nada foi gravado" é verdade numa prévia e
+  numa sessão expirada, não numa confirmação que perdeu a conexão.
 
 ---
 
@@ -499,8 +508,9 @@ o PostgREST (ver §Descobertas empíricas) mas mudaria a regra em silêncio — 
 
 ## Descobertas empíricas (medidas neste projeto — não redescubra)
 
-Cada item abaixo foi **verificado contra o Supabase real deste projeto** e mudou uma decisão de
-implementação. Não são hipóteses. Se alguma parecer errada, meça de novo antes de agir — mas meça.
+Cada item abaixo foi **medido neste projeto** — contra o Supabase real ou o servidor Next local — e
+mudou uma decisão de implementação. Não são hipóteses. Se alguma parecer errada, meça de novo antes
+de agir — mas meça.
 
 | Descoberta | Consequência no código |
 |---|---|
@@ -513,6 +523,7 @@ implementação. Não são hipóteses. Se alguma parecer errada, meça de novo a
 | `.select()` num upsert devolve **só as linhas realmente inseridas** | É daí que sai a contagem honesta de gravados |
 | Sem `AbortSignal`, o padrão do undici deixa um fetch pendurado (>20s medido; documentado 300s) | Prazos explícitos em `supabase-io.ts` |
 | `postgrest-js` repete só GET/HEAD/OPTIONS, 3× com backoff 1s/2s/4s | Leitura ganha teto de tempo; escrita não ganha retry |
+| Sem sessão, o proxy redireciona **também as rotas de API** para `/login` (307), e o `fetch` do navegador segue: `GET /api/dados` termina em **200 com HTML**; `POST /api/upload-csv` termina em **404 "Server action not found."** em texto | Chamada de API no navegador passa por `lib/resposta-http.ts`, que olha o desvio para o login **antes** do status |
 
 ## Fora de escopo por decisão (não implementar sem pedido explícito)
 

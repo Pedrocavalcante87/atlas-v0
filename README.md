@@ -2,7 +2,7 @@
 
 > Uma planilha de títulos em aberto entra. A resposta de **quem cobrar hoje, e o que mandar** sai.
 
-`Next.js 16 (App Router)` · `React 19` · `TypeScript` · `Tailwind CSS v4` · `Supabase/PostgreSQL` · `Vitest — 202 casos`
+`Next.js 16 (App Router)` · `React 19` · `TypeScript` · `Tailwind CSS v4` · `Supabase/PostgreSQL` · `Vitest — 218 casos`
 
 ---
 
@@ -16,7 +16,7 @@ em módulos testados, e as decisões difíceis estão documentadas junto do cód
 O que este repositório tenta demonstrar, além de "funciona":
 
 - **Domínio separado de I/O.** Priorização, ciclo de vida do título, parsing de CSV e apuração de
-  receita são funções puras — por isso 202 testes rodam em ~2s sem banco, sem browser e sem mock
+  receita são funções puras — por isso 218 testes rodam em ~2s sem banco, sem browser e sem mock
   de framework.
 - **Modos de falha tratados como funcionalidade.** Banco fora do ar não vira "lista vazia"; valor
   ambíguo na planilha não vira cobrança errada; ausência de senha em produção não vira app aberto.
@@ -163,6 +163,11 @@ No caso vermelho a tela informa quantos títulos chegaram a ser gravados antes d
 **reimportar o mesmo arquivo é seguro**: o que já entrou é reconhecido como duplicata e não entra
 duas vezes.
 
+Se a confirmação falhar antes de gerar relatório, o aviso aparece **na própria prévia**, logo acima
+do botão, e diz o que se sabe sobre o banco. Sessão expirada garante que nada foi gravado, e a tela
+oferece entrar de novo. Queda de conexão não garante nada, e o texto manda conferir a lista do dia
+antes de reimportar.
+
 **O sistema é flexível no reconhecimento de colunas.** Ele aceita muitos nomes diferentes para cada campo — útil para planilhas exportadas de diferentes ERPs ou sistemas. Colunas que ele não conhece (CPF, endereço, vendedor, observações) são simplesmente ignoradas.
 
 | Campo esperado | Exemplos de nomes aceitos |
@@ -275,6 +280,9 @@ leitura e clicar em "Limpar tudo" logo abaixo achando que não havia nada a perd
 
 Se uma exclusão falhar no meio, a mensagem é vermelha e avisa que parte dos dados pode ter sido
 removida — nunca verde de sucesso.
+
+Se a sessão tiver expirado, a tela diz isso e oferece entrar de novo, sem mostrar número nem ação
+de limpeza.
 
 ---
 
@@ -393,7 +401,7 @@ uma cobrança nova.
 | Banco de dados | Supabase (PostgreSQL) com RLS habilitado, acessado só pelo servidor |
 | Parse de CSV | PapaParse |
 | Autenticação | E-mail + senha (credencial única) · cookie HTTP-only assinado (HMAC-SHA256), verificado no Proxy |
-| Testes | Vitest — 202 casos em 8 arquivos: domínio, política de I/O e sessão |
+| Testes | Vitest — 218 casos em 9 arquivos: domínio, política de I/O, sessão e leitura de resposta no navegador |
 
 ---
 
@@ -499,7 +507,7 @@ Tudo abaixo roda em repositório recém-clonado, **sem `.env.local` e sem Supaba
 
 ```bash
 npm install
-npm run test        # 8 arquivos, 202 casos — deve passar em ~2s
+npm run test        # 9 arquivos, 218 casos — deve passar em ~2s
 npm run lint        # sem saída = sem problema
 npx tsc --noEmit    # sem saída = sem erro de tipo
 npm run build       # build de produção completo
@@ -508,8 +516,8 @@ npm run build       # build de produção completo
 Saída esperada do `npm run test`:
 
 ```
- Test Files  8 passed (8)
-      Tests  202 passed (202)
+ Test Files  9 passed (9)
+      Tests  218 passed (218)
 ```
 
 ### 1. Testes automatizados
@@ -730,7 +738,7 @@ correto: zero seria uma afirmação falsa sobre dinheiro.
 
 | # | Verificação | Como |
 |---|---|---|
-| 1 | Suíte automatizada verde | `npm run test` → 202/202 |
+| 1 | Suíte automatizada verde | `npm run test` → 218/218 |
 | 2 | Lint e tipos limpos | `npm run lint` · `npx tsc --noEmit` |
 | 3 | Build de produção | `npm run build` |
 | 4 | Login exigido em toda rota | Cenário 0 |
