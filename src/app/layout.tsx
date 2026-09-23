@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import NavbarWrapper from "@/components/NavbarWrapper";
+import Avisos from "@/components/Avisos";
 
 // Inter com `variable` e sem pesos fixos: a variável cobre 100–900, então a
 // hierarquia é feita por peso sem baixar um arquivo por corte.
@@ -53,10 +54,14 @@ export default function RootLayout({
         >
           Pular para o conteúdo
         </a>
-        <NavbarWrapper />
-        <div id="conteudo" tabIndex={-1} className="flex-1 outline-none">
-          {children}
-        </div>
+        {/* Avisos no layout: sobrevivem à revalidação que tira da fila a
+            linha que acabou de ser registrada (ver components/Avisos.tsx). */}
+        <Avisos>
+          <NavbarWrapper />
+          <div id="conteudo" tabIndex={-1} className="flex-1 outline-none">
+            {children}
+          </div>
+        </Avisos>
       </body>
     </html>
   );

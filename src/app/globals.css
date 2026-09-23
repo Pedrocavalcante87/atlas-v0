@@ -172,6 +172,22 @@
   --text-cifra: 22px;
   --text-cifra--line-height: 26px;
   --text-cifra--letter-spacing: -0.02em;
+
+  /* --- Movimento ---------------------------------------------------------
+     Um só: a entrada do aviso flutuante. Curto e sem "quique" — é um
+     registro financeiro sendo confirmado, não uma celebração. Quem usa
+     aplica com `motion-safe:`, para respeitar quem pediu menos movimento. */
+  --animate-entrar: entrar 160ms ease-out;
+  @keyframes entrar {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------------

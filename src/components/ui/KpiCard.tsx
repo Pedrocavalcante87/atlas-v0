@@ -31,11 +31,13 @@ interface Props {
   /** Texto pequeno sob o valor — janela de apuração, unidade, indisponibilidade. */
   nota?: string;
   tom?: TomKpi;
+  /** Classes de grade de quem posiciona o card (ex.: ocupar duas colunas no celular). */
+  className?: string;
 }
 
-export default function KpiCard({ rotulo, valor, nota, tom = 'neutro' }: Props) {
+export default function KpiCard({ rotulo, valor, nota, tom = 'neutro', className = '' }: Props) {
   return (
-    <div className="relative bg-superficie border border-borda rounded-md px-4 py-3.5 overflow-hidden">
+    <div className={`relative bg-superficie border border-borda rounded-md px-4 py-3.5 overflow-hidden ${className}`}>
       <span aria-hidden className={`absolute left-0 top-0 h-0.5 w-full ${FILETE[tom]}`} />
       <p className="text-legenda text-texto-suave mb-1.5 uppercase tracking-[0.04em]">{rotulo}</p>
       <p className={`text-cifra font-semibold numero leading-none truncate ${VALOR[tom]}`}>
