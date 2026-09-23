@@ -82,10 +82,12 @@ export default function Navbar() {
           <Link
             href="/upload"
             aria-current={pathname.startsWith('/upload') ? 'page' : undefined}
-            className="inline-flex items-center gap-1.5 h-8 px-2 sm:px-3 text-corpo font-medium rounded-md
-                       border border-borda-forte text-texto bg-superficie
+            className={`inline-flex items-center gap-1.5 h-8 px-2 sm:px-3 text-corpo font-medium rounded-md
+                       border border-borda-forte text-texto
                        hover:bg-superficie-sutil hover:border-tinta-400
-                       active:bg-superficie-afundada transition-colors"
+                       active:bg-superficie-afundada transition-colors ${
+                         pathname.startsWith('/upload') ? 'bg-superficie-afundada' : 'bg-superficie'
+                       }`}
           >
             <IconeImportar className="w-3.5 h-3.5 text-texto-suave" />
             <span className="sr-only sm:not-sr-only">Importar planilha</span>
