@@ -10,7 +10,7 @@ import Pagina from '@/components/ui/Pagina';
 import CabecalhoPagina from '@/components/ui/CabecalhoPagina';
 import Aviso from '@/components/ui/Aviso';
 import { estiloBotao } from '@/components/ui/Botao';
-import { formatarMoeda, comMaiuscula } from '@/lib/format';
+import { formatarMoeda, comMaiuscula, dataLocalISO } from '@/lib/format';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 
@@ -111,6 +111,7 @@ export default async function HomePage() {
   const hoje = comMaiuscula(
     agora.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }),
   );
+  const hojeISO = dataLocalISO(agora);
 
   return (
     <Pagina>
@@ -142,7 +143,7 @@ export default async function HomePage() {
           <KpiCard
             rotulo="Recuperado"
             valor={recuperado === null ? '—' : formatarMoeda(recuperado)}
-            tom="marca"
+            tom={recuperado ? 'marca' : 'neutro'}
             nota={recuperado === null ? 'indisponível' : `últimos ${JANELA_RECUPERACAO_DIAS} dias`}
             className="col-span-2 sm:col-span-1"
           />
@@ -172,6 +173,7 @@ export default async function HomePage() {
             rotuloPrazo="Atraso"
             grupos={gruposVencidos}
             contatos={contatos}
+            hoje={hojeISO}
           />
           <FilaCobranca
             id="fila-a-vencer"
@@ -180,6 +182,7 @@ export default async function HomePage() {
             rotuloPrazo="Vence"
             grupos={gruposPreventivos}
             contatos={contatos}
+            hoje={hojeISO}
           />
         </div>
       )}

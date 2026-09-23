@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ultimoContatoPorCliente, foiHoje, rotuloContato } from './contato';
+import { ultimoContatoPorCliente, foiHoje, rotuloContato, rotuloReentrada } from './contato';
 
 // Datas montadas no fuso LOCAL: o rótulo usa o relógio de quem renderiza, e
 // assim o teste passa em qualquer fuso em que a suíte rodar.
@@ -62,5 +62,34 @@ describe('rotuloContato', () => {
 
   it('a virada do dia vale mais que as horas: 23h de ontem é "ontem"', () => {
     expect(rotuloContato(new Date(2026, 8, 22, 23, 50), new Date(2026, 8, 23, 0, 10))).toBe('ontem às 23:50');
+  });
+});
+
+describe('rotuloReentrada', () => {
+  const HOJE = '2026-09-23';
+
+  it('promessa de dia passado é vencida, com a data', () => {
+    expect(rotuloReentrada({ motivoReentrada: 'promessa_vencida', data_promessa: '2026-09-20' }, HOJE)).toBe(
+      'promessa de 20/09 vencida',
+    );
+  });
+
+  it('promessa para hoje NÃO é vencida — voltou só para ser conferida', () => {
+    expect(rotuloReentrada({ motivoReentrada: 'promessa_vencida', data_promessa: HOJE }, HOJE)).toBe(
+      'promessa para hoje',
+    );
+  });
+
+  it('promessa sem data e silêncio expirado têm rótulo próprio', () => {
+    expect(rotuloReentrada({ motivoReentrada: 'promessa_vencida', data_promessa: null }, HOJE)).toBe(
+      'promessa vencida',
+    );
+    expect(rotuloReentrada({ motivoReentrada: 'silencio_expirado', data_promessa: null }, HOJE)).toBe(
+      'voltou após sem resposta',
+    );
+  });
+
+  it('título na fila pela primeira vez não tem rótulo', () => {
+    expect(rotuloReentrada({ motivoReentrada: null, data_promessa: null }, HOJE)).toBeNull();
   });
 });

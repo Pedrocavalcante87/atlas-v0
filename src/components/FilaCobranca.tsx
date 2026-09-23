@@ -36,12 +36,14 @@ interface Props {
   rotuloPrazo: string;
   grupos: ClienteAgrupado[];
   contatos: Record<string, ContatoDoCliente>;
+  /** YYYY-MM-DD no relógio do servidor (ver ClienteLinha). */
+  hoje: string;
 }
 
 const TH =
   'px-3 py-2 text-legenda font-medium text-texto-suave uppercase tracking-[0.04em] whitespace-nowrap';
 
-export default function FilaCobranca({ id, titulo, complemento, rotuloPrazo, grupos, contatos }: Props) {
+export default function FilaCobranca({ id, titulo, complemento, rotuloPrazo, grupos, contatos, hoje }: Props) {
   if (grupos.length === 0) return null;
 
   const contatadosHoje = grupos.filter((g) => contatos[g.cliente.id]?.hoje).length;
@@ -107,6 +109,7 @@ export default function FilaCobranca({ id, titulo, complemento, rotuloPrazo, gru
                 key={grupo.cliente.id}
                 grupo={grupo}
                 contato={contatos[grupo.cliente.id] ?? null}
+                hoje={hoje}
               />
             ))}
           </tbody>

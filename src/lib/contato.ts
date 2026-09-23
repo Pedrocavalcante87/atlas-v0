@@ -1,3 +1,4 @@
+import type { MotivoReentrada } from '@/types';
 import { dataLocalISO, formatarData, formatarDataCurta, formatarHora, instanteDoBanco, plural } from './format';
 
 // ---------------------------------------------------------------------------
@@ -64,4 +65,29 @@ export function rotuloContato(instante: Date, agora: Date): string {
   return instante.getFullYear() === agora.getFullYear()
     ? `em ${formatarDataCurta(dia)}`
     : `em ${formatarData(dia)}`;
+}
+
+/**
+ * Por que o título está na fila de novo, em palavras — o domínio calcula
+ * (`motivoReentrada`, lib/prioridade.ts), a tela mostra.
+ *
+ * O domínio chama de "promessa_vencida" tudo que chegou à data prometida
+ * (`estaNaFilaHoje`: "hoje ou no passado"). Mas uma promessa PARA HOJE não foi
+ * quebrada — ela só voltou para ser conferida. Chamá-la de "vencida" no próprio
+ * dia acusaria o cliente de algo que ainda não aconteceu.
+ *
+ * `hoje` é YYYY-MM-DD do servidor, recebido pronto (ver ClienteLinha).
+ */
+export function rotuloReentrada(
+  titulo: { motivoReentrada: MotivoReentrada | null; data_promessa: string | null },
+  hoje: string,
+): string | null {
+  if (titulo.motivoReentrada === 'promessa_vencida') {
+    if (!titulo.data_promessa) return 'promessa vencida';
+    return titulo.data_promessa >= hoje
+      ? 'promessa para hoje'
+      : `promessa de ${formatarDataCurta(titulo.data_promessa)} vencida`;
+  }
+  if (titulo.motivoReentrada === 'silencio_expirado') return 'voltou após sem resposta';
+  return null;
 }

@@ -2,9 +2,10 @@
 
 import { useState, type KeyboardEvent } from 'react';
 import Link from 'next/link';
-import type { ClienteAgrupado, StatusTitulo, TituloComPrioridade } from '@/types';
+import type { ClienteAgrupado, StatusTitulo } from '@/types';
 import { registrarEnvio, atualizarStatusTitulo } from '@/actions';
 import { DIAS_SILENCIO_SEM_RESPOSTA } from '@/lib/prioridade';
+import { rotuloReentrada } from '@/lib/contato';
 import {
   formatarMoeda,
   formatarTelefone,
@@ -32,20 +33,14 @@ import type { ContatoDoCliente } from './FilaCobranca';
 interface Props {
   grupo: ClienteAgrupado;
   contato: ContatoDoCliente | null;
+  /** YYYY-MM-DD do servidor. Vem pronto para servidor e navegador concordarem na hidratação. */
+  hoje: string;
 }
 
 function linkWhatsApp(telefone: string, mensagem: string) {
   return `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`;
 }
 
-/** Por que o título voltou à fila, em palavras — o domínio calcula, a tela mostra. */
-function textoReentrada(t: TituloComPrioridade): string | null {
-  if (t.motivoReentrada === 'promessa_vencida') {
-    return t.data_promessa ? `promessa de ${formatarDataCurta(t.data_promessa)} vencida` : 'promessa vencida';
-  }
-  if (t.motivoReentrada === 'silencio_expirado') return 'voltou após sem resposta';
-  return null;
-}
 
 const ROTULO_RESOLVIDO: Record<StatusTitulo, string> = {
   pago: 'pago',
@@ -61,7 +56,7 @@ const ROTULO_RESOLVIDO: Record<StatusTitulo, string> = {
  * dia. Os títulos individuais aparecem ao expandir, porque o cliente pode
  * pagar um e não outro, e o registro de resultado é por título.
  */
-export default function ClienteLinha({ grupo, contato }: Props) {
+export default function ClienteLinha({ grupo, contato, hoje }: Props) {
   const [aberta, setAberta] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [enviado, setEnviado] = useState(false);
@@ -130,11 +125,16 @@ export default function ClienteLinha({ grupo, contato }: Props) {
       // completo, não o primeiro: em "FERREIRA & ASSOCIADOS ME" o primeiro
       // nome não identifica ninguém.
       const valor = formatarMoeda(titulo.valor);
+      // Promessa para hoje NÃO tira o título da fila: a data já chegou, e o
+      // domínio o mantém à vista para conferir o pagamento.
+      const promessaParaHoje = promessa !== undefined && promessa <= dataLocalISO(new Date());
       avisar(
         status === 'pago'
           ? `${cliente.nome}: pagamento de ${valor} registrado.`
           : status === 'promessa' && promessa
-          ? `${cliente.nome}: promessa de ${valor} para ${formatarDataCurta(promessa)}. Sai da fila até lá.`
+          ? promessaParaHoje
+            ? `${cliente.nome}: promessa de ${valor} para hoje. Fica na fila para você conferir o pagamento.`
+            : `${cliente.nome}: promessa de ${valor} para ${formatarDataCurta(promessa)}. Sai da fila até lá.`
           : `${cliente.nome}: sem resposta registrado. Volta à fila em ${plural(DIAS_SILENCIO_SEM_RESPOSTA, 'dia', 'dias')}.`,
       );
     } catch {
@@ -202,7 +202,7 @@ export default function ClienteLinha({ grupo, contato }: Props) {
               {reentrada && (
                 <Badge tom="neutro">
                   <IconeRetorno className="w-3 h-3" />
-                  {textoReentrada(reentrada)}
+                  {rotuloReentrada(reentrada, hoje)}
                 </Badge>
               )}
               {contato && (
@@ -335,7 +335,7 @@ export default function ClienteLinha({ grupo, contato }: Props) {
                 <ul className="space-y-1.5 max-w-3xl">
                   {titulos.map((t) => {
                     const resolvido = resolvidos[t.id];
-                    const reentradaDoTitulo = textoReentrada(t);
+                    const reentradaDoTitulo = rotuloReentrada(t, hoje);
                     return (
                       <li key={t.id} className="bg-superficie border border-borda rounded-md">
                         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
