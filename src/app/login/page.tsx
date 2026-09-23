@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Marca from '@/components/Marca';
 import { Botao } from '@/components/ui/Botao';
+import { chamarApi, mensagemDeFalha } from '@/lib/resposta-http';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -17,26 +18,32 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
 
-    const res = await fetch('/api/login', {
+    // `chamarApi` não rejeita: sem ele, uma queda de rede deixava o botão em
+    // "Entrando…" para sempre, sem mensagem nenhuma.
+    const leitura = await chamarApi('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
 
-    if (res.ok) {
+    if (leitura.tipo === 'ok') {
       router.push('/');
       router.refresh();
-    } else {
-      // 429 é o limitador de tentativas, não credencial errada — dizer
-      // "incorretos" a quem já acertou mandaria a pessoa tentar de novo em vez
-      // de esperar, que é o oposto do que precisa acontecer.
-      setError(
-        res.status === 429
-          ? 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.'
-          : 'E-mail ou senha incorretos.',
-      );
-      setLoading(false);
+      return;
     }
+
+    const status = 'status' in leitura ? leitura.status : 0;
+    // 429 é o limitador de tentativas, não credencial errada — dizer
+    // "incorretos" a quem já acertou mandaria a pessoa tentar de novo em vez
+    // de esperar, que é o oposto do que precisa acontecer.
+    setError(
+      status === 429
+        ? 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.'
+        : status === 401
+        ? 'E-mail ou senha incorretos.'
+        : mensagemDeFalha(leitura, 'Não foi possível entrar agora. Tente de novo.'),
+    );
+    setLoading(false);
   }
 
   return (

@@ -43,16 +43,19 @@ precisa antes de tocar em qualquer coisa.
 10. **Teste o que alterar.** A suíte cobre o domínio e a política de I/O, **não** rotas, Server
     Actions nem componentes (ver §Comandos) — rode `npm run test`, `npm run lint` e
     `npx tsc --noEmit`, e valide o fluxo manualmente via `npm run dev` quando a mudança afetar UI,
-    rota ou dado. Para concorrência, indisponibilidade ou qualquer coisa que envolva o banco de
-    verdade, teste unitário **não é evidência suficiente** — este projeto já produziu defeitos que
-    só apareceram na reprodução real (ver §Descobertas empíricas).
+    rota ou dado. Mudança de interface se valida também **visualmente**, no desktop e em 375px
+    (ver §Comandos, "Validação visual existe"). Para concorrência, indisponibilidade ou qualquer
+    coisa que envolva o banco de verdade, teste unitário **não é evidência suficiente** — este
+    projeto já produziu defeitos que só apareceram na reprodução real (ver §Descobertas empíricas).
 11. **Revise criticamente depois de implementar.** Procure bug, regressão, edge case, duplicação
     nova, complexidade desnecessária e problema de segurança antes de considerar concluído.
 12. **Respeite o escopo.** Implemente o que foi pedido. Se achar problema não relacionado,
     registre e explique o impacto em vez de consertar por conta própria dentro da mesma tarefa.
 13. **Git com rastreabilidade e branches.** Nunca comece funcionalidade, correção ou refatoração
-    commitando direto na `main` — crie uma branch dedicada primeiro. Política completa de branches,
-    commits, merge e o que exige autorização explícita em §Workflow Git.
+    commitando direto na `main` — crie uma branch dedicada primeiro. **Commit e push da branch de
+    trabalho estão autorizados a cada evolução do sistema** (desde 2026-09-23); integrar à `main`
+    continua exigindo autorização explícita. Política completa de branches, commits, push, merge e
+    o que exige autorização em §Workflow Git.
 14. **Documentação no lugar certo.** Fato arquitetural novo vai para `ARCHITECTURE.md`; este
     arquivo (`CLAUDE.md`) é para regra de comportamento, contexto essencial e comandos — não para
     documentação extensa de sistema.
@@ -114,8 +117,9 @@ a caber nele. Se o código é que está errado, isso é um bug, e vira tarefa pr
 ## Workflow Git
 
 Repositório real é `atlas/` (a pasta um nível acima não é um repo git). Remote `origin` →
-`github.com/Pedrocavalcante87/atlas-v0`. Só existe a branch `main` (local e remota) — não há
-`develop`. Não há CI/GitHub Actions nem branch protection configurados neste repositório (nada em
+`github.com/Pedrocavalcante87/atlas-v0`. A branch principal é `main` — não há `develop`; as demais
+são branches de trabalho (liste com `git branch -a`, não confie em lista escrita aqui). Não há
+CI/GitHub Actions nem branch protection configurados neste repositório (nada em
 `.github/workflows/`; proteção de branch no GitHub não pôde ser verificada por falta de acesso à
 API/gh CLI neste ambiente — não assuma que existe nem que não existe, confirme se for relevante
 para uma decisão). A política abaixo é de **processo**, não depende de proteção técnica do GitHub
@@ -149,14 +153,27 @@ novo.
 - **Antes de cada commit**, revise `git status`/`git diff` (staged e unstaged) e confirme que só
   entram mudanças relacionadas à tarefa. Não use `git add -A`/`git add .` sem olhar o que está
   sendo incluído.
-- **Nunca faça commit sem pedido explícito do usuário** (regra já existente, mantida).
+- **Commit e push da branch de trabalho estão autorizados, sem pedir, a cada evolução do
+  sistema.** Autorização permanente dada pelo usuário em 2026-09-23 ("você tem autorização de
+  fazer commit e push a cada evolução do sistema"). Até então cada commit e cada push exigiam
+  pedido explícito. Na prática:
+  - Commite ao fechar cada mudança lógica, sempre na branch dedicada — nunca direto na `main`.
+  - Faça push da branch (`git push -u origin <branch>`) ao concluir a evolução, **depois** de as
+    verificações passarem: `npm run test`, `npm run lint`, `npx tsc --noEmit`, `npm run build` e,
+    se a mudança mexe em interface, a validação visual (ver §Comandos). Branch com verificação
+    falhando não sobe.
+  - Depois do push o histórico da branch é público: correção vira commit novo, nunca reescrita.
+  - Ao terminar, informe a branch, os commits e o link de pull request que o push imprime
+    (`pull/new/<branch>`) — este ambiente não tem `gh` para abrir o PR.
+  - A autorização **não cobre** integrar à `main` nem as operações da lista "Exige autorização
+    explícita" abaixo.
 - **Antes de sugerir ou abrir um merge para `main`**, rode as verificações que existem hoje no
   projeto — `npm run lint`, `npx tsc --noEmit` — e valide manualmente via `npm run dev` quando a
   mudança afeta UI ou dado (a suíte cobre só o domínio, ver §Comandos). Reporte o resultado dessas
   checagens ao usuário antes do merge, não depois.
-- **Nunca faça merge para `main`, nem push de nenhuma branch para `origin` (incluindo branches de
-  feature/fix/refactor/hotfix), sem autorização explícita do usuário para aquela ação específica** —
-  merge local (`git merge`) ou via Pull Request no GitHub, o que o usuário preferir no momento.
+- **Nunca faça merge para `main`, nem push direto para a `main`, sem autorização explícita do
+  usuário para aquela ação específica** — merge local (`git merge`) ou via Pull Request no GitHub,
+  o que o usuário preferir no momento. Push de branch de trabalho está autorizado (item acima).
 - **Nunca use `git reset --hard`, `git push --force`/`--force-with-lease`, rebase que reescreve
   commits já publicados, `git branch -D`, `git push origin --delete`, ou qualquer operação que
   apague/reescreva histórico** sem autorização explícita do usuário para aquela operação específica.
@@ -177,7 +194,8 @@ novo.
 ### Exige autorização explícita do usuário (parar e perguntar)
 
 - Merge para `main`, por qualquer método (fast-forward, merge commit, squash) — local ou via PR.
-- Push para `main`, ou push de qualquer branch para `origin`.
+- Push para `main`. (Push de branch de trabalho deixou de precisar de pedido em 2026-09-23 — ver
+  §Regras obrigatórias.)
 - `git reset --hard`, `git push --force`/`--force-with-lease`, rebase de commits já publicados,
   `git branch -D`, `git push origin --delete`, ou remoção de branch/tag.
 - Descartar alterações não commitadas fora do escopo estrito da tarefa (`git checkout -- .`,
@@ -196,7 +214,7 @@ novo.
 | Banco | Supabase (Postgres gerenciado) | `@supabase/supabase-js` ^2.110.9 |
 | Parse de CSV | PapaParse | ^5.5.4 |
 | Lint | ESLint | ^9, `eslint-config-next` |
-| Testes | Vitest | ^4 — 202 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
+| Testes | Vitest | ^4 — 246 casos em `lib/`; rotas, Server Actions e componentes sem cobertura |
 
 ### ⚠️ Next.js 16 tem breaking changes reais neste projeto — não confie no seu treino
 
@@ -216,15 +234,25 @@ npm run dev     # servidor de desenvolvimento (localhost:3000)
 npm run build   # build de produção
 npm run start   # serve o build de produção
 npm run lint    # ESLint
-npm run test    # vitest — 202 casos, todos em src/lib/
+npm run test    # vitest — 246 casos, todos em src/lib/
 ```
 
-**O que tem cobertura** (`src/lib/*.test.ts`, 202 casos): `prioridade.ts` (score, categorização,
+**O que tem cobertura** (`src/lib/*.test.ts`, 246 casos): `prioridade.ts` (score, categorização,
 reentrada), `csv-import.ts` (parsing, validação, planejamento do lote, deduplicação),
 `recuperacao.ts` (apuração), `supabase-io.ts` (classificação de falha, paginação por cursor),
 `importacao.ts` (máquina de estados de conflito), `sessao.ts` (assinatura, expiração e recusa de
-cookie forjado), `rate-limit.ts` (janela, reinício e expurgo de entradas velhas) e `credenciais.ts`
-(normalização de e-mail e derivação do segredo de sessão).
+cookie forjado), `rate-limit.ts` (janela, reinício e expurgo de entradas velhas), `credenciais.ts`
+(normalização de e-mail e derivação do segredo de sessão), `resposta-http.ts` (como o navegador
+lê a resposta de uma rota: sessão expirada, queda de rede, corpo que não é JSON), `format.ts`
+(plural, datas sem fuso, `timestamp` do banco lido como UTC, rótulo de vencimento) e `contato.ts`
+(último contato por cliente, o rótulo "hoje às 10:32" e o de retorno à fila).
+
+**Validação visual existe**, fora da suíte: não há teste de componente, mas a interface pode ser
+exercitada num navegador real (Edge headless controlado por `puppeteer-core` instalado fora do
+projeto). Mudança de UI se valida assim — captura em desktop e em 375px, e o fluxo clicado —, não
+só com `tsc` e lint. Ao validar, **não grave dado de verdade**: nada de marcar pago, confirmar
+importação ou limpar dados; se precisar gravar para ver um fluxo, use um cliente de teste e diga
+qual e o que mudou.
 
 **O que NÃO tem cobertura, e precisa de verificação manual**: rotas de API, Server Actions,
 componentes React, o encadeamento HTTP entre UI e backend, comportamento sob dependência
@@ -240,17 +268,21 @@ admitir a lacuna.
 
 ```
 src/
-├── app/             # rotas (App Router) + API routes em app/api/*/route.ts
+├── app/             # rotas (App Router) + API routes em app/api/*/route.ts; na raiz,
+│                    #   loading, error, not-found e icon.svg
 ├── components/       # componentes de UI ('use client' onde há interação)
-│   ├── ui/             # primitivas (Botao, BotaoIcone, Badge, Icone, KpiCard)
+│   ├── ui/             # primitivas: Pagina, CabecalhoPagina, Painel, Aviso, KpiCard, Badge,
+│   │                   #   Botao (+ estiloBotao), BotaoIcone, Icone
 │   ├── FilaCobranca.tsx  # a fila do dia como tabela
 │   ├── ClienteLinha.tsx  # uma linha = um cliente; expande para os títulos
+│   ├── Avisos.tsx      # avisos flutuantes (provedor no layout, `useAvisos`)
 │   └── Marca.tsx       # símbolo + wordmark
 ├── lib/
 │   ├── prioridade.ts   # domínio puro: urgência, score, fila do dia, agrupamento
 │   ├── templates.ts    # domínio puro: texto das mensagens
 │   ├── csv-import.ts   # domínio puro: parsing, validação, planejamento do lote
-│   ├── format.ts       # domínio puro: formatarMoeda
+│   ├── format.ts       # exibição pura: moeda, plural, datas, `instanteDoBanco`, rótulo de vencimento
+│   ├── contato.ts      # exibição pura: último contato por cliente e "hoje às 10:32"
 │   ├── importacao.ts   # gravação do lote (conflito/conciliação) — I/O injetado, sem importar supabase
 │   ├── recuperacao.ts  # misto: apuração pura + uma leitura
 │   ├── supabase-io.ts  # POLÍTICA de I/O: prazo, classificação de falha, paginação
@@ -258,6 +290,7 @@ src/
 │   ├── sessao.ts       # domínio puro: assina/valida o cookie de sessão (HMAC + expiração)
 │   ├── credenciais.ts  # e-mail + senha do ambiente e o segredo derivado das duas
 │   ├── rate-limit.ts   # domínio puro: janela de tentativas por chave, com expurgo
+│   ├── resposta-http.ts # navegador: lê resposta de API — sessão expirada, rede, corpo inválido
 │   └── *.test.ts       # vitest (npm run test)
 ├── actions/          # Server Actions ('use server')
 ├── types/            # tipos TS compartilhados
@@ -299,11 +332,20 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
   de caçar classe em quinze. A paleta `slate`/`blue`/`emerald` do Tailwind **saiu do código** —
   reintroduzi-la quebra o sistema em silêncio, porque a cor continua funcionando e só a
   consistência morre.
-- **A cor do domínio é gramática, não estética.** `risco` = vencido, `atencao` = vence em breve,
-  `marca` = pago/recuperado. O usuário lê a fila por cor antes de ler o texto. Os tons são
-  dessaturados de propósito: vermelho vivo numa lista inteira de inadimplentes vira ruído e para
-  de significar urgência. `Badge` + `tomDaCategoria` (`components/ui/Badge.tsx`) são a fonte única
-  da tradução categoria → cor.
+- **A cor do domínio é gramática, não estética — e é uma ESCALA de urgência, a mesma em toda
+  tela.** `risco` = atraso longo (mais de 7 dias), `atencao` = atraso leve (1 a 7 dias), **neutro =
+  a vencer** e estados sem urgência própria (promessa, sem resposta), `marca` = pago/recuperado.
+  Fora da fila, `risco` é erro que impede a operação e `atencao` é cuidado (duplicata, prévia
+  ainda não gravada). O usuário lê a fila por cor antes de ler o texto. Os tons são dessaturados
+  de propósito: vermelho vivo numa lista inteira de inadimplentes vira ruído e para de significar
+  urgência. `Badge` + `tomDaCategoria` (`components/ui/Badge.tsx`) são a fonte única da tradução
+  categoria → cor. (Até 2026-09-23 esta linha dizia "`atencao` = vence em breve", enquanto a tabela
+  aprovada pintava de âmbar o atraso leve; valeu a tela, e o texto foi corrigido.) Verde em
+  "R$ 0,00" não: zero não é conquista.
+- **`texto-fraco` passa no contraste AA** (5,00:1 sobre branco, 4,62:1 sobre `linha-hover`), mas
+  **não sobre `superficie-afundada`** (4,42:1). Texto pequeno colorido usa o degrau 700: o
+  `atencao-600` fica em 4,45:1. Cor nova de texto se mede antes de entrar — o valor anterior do
+  token media 2,55:1 e reprovava em trinta e um lugares.
 - **Verde é a marca E significa "pago" — não é colisão.** O Atlas existe para recuperar dinheiro,
   então marca e sucesso são a mesma ideia; o contexto desambigua (badge verde = pago, botão verde
   = ação primária). Não crie um segundo verde para "resolver" isso.
@@ -323,9 +365,39 @@ paginação. Os dois juntos são o padrão real do projeto — não introduza re
   largura de dígito fixa a coluna de valores muda de largura a cada render e fica impossível
   comparar de relance, que é a tarefa do usuário na lista do dia.
 - **Botão e etiqueta vêm de `components/ui/`**, com variante por PAPEL (`primario`, `secundario`,
-  `sutil`, `perigo`), não por cor. Só um `primario` por bloco.
+  `sutil`, `perigo`), não por cor. Só um `primario` por bloco. `Link` do Next com cara de botão usa
+  `estiloBotao(variante, tamanho)` — não copie a lista de classes. Botão que espera o servidor usa
+  `carregando`, não esmaece.
+- **Toda tela depois do login é `Pagina` + `CabecalhoPagina`** (o único `h1`), com `Painel` para
+  blocos e `Aviso` para mensagens. O login tem layout próprio, centralizado e sem barra. Emoji não
+  é ícone: os ícones vêm de `components/ui/Icone.tsx`, no grid de 16. `font-mono` direto só em
+  texto técnico — nome de coluna em `<code>`, a frase que se digita para confirmar —; dinheiro e
+  telefone usam `.numero`.
+- **Ação sem volta pede confirmação que diz o que vai acontecer, com o valor.** "Pago" é o único
+  estado terminal e a interface não oferece desfazer: pede um segundo clique, em outro lugar da
+  tela, dizendo o valor. "Limpar tudo" pede a frase digitada. Promessa e sem resposta não pedem —
+  são pausas. Esc cancela.
+- **Confirmação de registro vai para `useAvisos`, não para dentro da linha.** A Server Action
+  revalida a página e o título registrado sai da fila na hora; com o único título do cliente, a
+  linha inteira some — e qualquer mensagem desenhada nela some junto.
+- **Rótulo que depende do relógio ("hoje", "há 3 dias") é calculado no servidor** e entregue
+  pronto ao componente. Calculado no navegador, servidor e navegador podem discordar sobre o fuso
+  e a hidratação quebra. "Hoje" é o relógio do servidor, o mesmo de `calcularDiasAtraso`.
+- **Hora de coluna `timestamp` passa por `instanteDoBanco`** (`lib/format.ts`). `data_envio` e
+  `criado_em` não têm fuso e vêm sem `Z`; `new Date()` direto as lê como hora local e adianta três
+  horas (medido, ver §Descobertas empíricas).
+- **Celular não rola na horizontal.** Tabela que não cabe esconde colunas secundárias e desce
+  valor e prazo para baixo do nome; ação principal (WhatsApp) sempre visível. Dinheiro não
+  divide largura com outro card no celular — cortado ("R$ 10.56…") não serve.
 - **`'use client'` só onde há estado/interação** (formulários, botões com handler). Páginas que só
   leem e renderizam são Server Components por padrão.
+- **Chamada de API a partir do navegador passa por `chamarApi`** (`lib/resposta-http.ts`), nunca
+  `fetch` + `res.json()` + `res.ok` direto. O proxy devolve a rota de API sem sessão para `/login`,
+  e o `fetch` segue o redirecionamento: o GET chega como **200 com o HTML do login**, o POST como
+  404 em texto. `res.ok` sozinho lê o HTML como sucesso, e `res.json()` sozinho lança e trava a
+  tela. `chamarApi` nunca rejeita e devolve um desfecho; a **mensagem final é de quem chama**,
+  porque só ele sabe o que a operação pode ter feito — "nada foi gravado" é verdade numa prévia e
+  numa sessão expirada, não numa confirmação que perdeu a conexão.
 
 ---
 
@@ -422,6 +494,7 @@ Cada um está garantido por mecanismo, não por disciplina de quem escreve o có
 | Invariante | Garantido por |
 |---|---|
 | Nenhum estado inventado quando o banco não responde | `ler`/`lerPaginado` lançam; rotas devolvem 503; nunca `?? 0` |
+| No navegador, resposta que não veio da rota — login, HTML, rede fora — nunca vira sucesso nem botão travado | `lib/resposta-http.ts::lerResposta` checa o desvio para `/login` antes do status; `chamarApi` nunca rejeita |
 | Leitura de lista é completa ou é erro — nunca truncada em silêncio | `lerPaginado` por cursor, `T extends { id: string }` |
 | No máximo um título `aberto` por (cliente, valor, vencimento) | `idx_titulos_aberto_unico` no Postgres |
 | Reimportar o mesmo arquivo não duplica cobrança | Índice único + tratamento de 23505 como duplicata |
@@ -499,8 +572,9 @@ o PostgREST (ver §Descobertas empíricas) mas mudaria a regra em silêncio — 
 
 ## Descobertas empíricas (medidas neste projeto — não redescubra)
 
-Cada item abaixo foi **verificado contra o Supabase real deste projeto** e mudou uma decisão de
-implementação. Não são hipóteses. Se alguma parecer errada, meça de novo antes de agir — mas meça.
+Cada item abaixo foi **medido neste projeto** — contra o Supabase real ou o servidor Next local — e
+mudou uma decisão de implementação. Não são hipóteses. Se alguma parecer errada, meça de novo antes
+de agir — mas meça.
 
 | Descoberta | Consequência no código |
 |---|---|
@@ -513,6 +587,9 @@ implementação. Não são hipóteses. Se alguma parecer errada, meça de novo a
 | `.select()` num upsert devolve **só as linhas realmente inseridas** | É daí que sai a contagem honesta de gravados |
 | Sem `AbortSignal`, o padrão do undici deixa um fetch pendurado (>20s medido; documentado 300s) | Prazos explícitos em `supabase-io.ts` |
 | `postgrest-js` repete só GET/HEAD/OPTIONS, 3× com backoff 1s/2s/4s | Leitura ganha teto de tempo; escrita não ganha retry |
+| Sem sessão, o proxy redireciona **também as rotas de API** para `/login` (307), e o `fetch` do navegador segue: `GET /api/dados` termina em **200 com HTML**; `POST /api/upload-csv` termina em **404 "Server action not found."** em texto | Chamada de API no navegador passa por `lib/resposta-http.ts`, que olha o desvio para o login **antes** do status |
+| `interacoes.data_envio` é `timestamp` **sem fuso**, gravado em UTC; o PostgREST devolve `"2026-09-21T10:21:49.650311"`, sem `Z`, e `new Date()` lê como hora **local**. Medido contra um `resolvido_em` (timestamptz) gravado no mesmo instante: `10:21:49+00:00` | Exibição passa por `instanteDoBanco`; o histórico mostrava as horas três horas adiantadas |
+| `revalidatePath` dentro de Server Action atualiza a tela **na hora** (doc do Next 16, confirmado no navegador): o título registrado sai da fila, e a linha do cliente some se era o único | Confirmação de registro mora em `components/Avisos.tsx`, no layout, fora da fila |
 
 ## Fora de escopo por decisão (não implementar sem pedido explícito)
 
@@ -523,6 +600,9 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
 - Envio automático de WhatsApp via API oficial. O `wa.me` manual resolve com fricção aceitável.
 - IA para priorização ou geração de mensagem. Não há volume de dado para aprender nada, e a
   fórmula atual não foi provada insuficiente.
+- **Desfazer "pago" pela UI.** É edição de título (item abaixo) e mexe em `resolvido_em`, que
+  sustenta a apuração de recuperado. A mitigação escolhida é a confirmação com o valor antes de
+  gravar (ver §Convenções), não o desfazer depois.
 - Notificações/lembretes agendados, exportação de relatórios, edição de cliente/título pela UI,
   integrações com ERP, paginação **de UI** da lista do dia (quantos cards mostrar por vez — não
   confundir com paginar a *leitura*, que passou a ser obrigatória, ver §Leitura de listas).
@@ -571,7 +651,9 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   não vazio". Se mudar o formato de uma linha em `lib/csv-import.ts::LinhaImportacao`, atualize o
   validador junto, senão a confirmação passa a rejeitar dados legítimos.
 - `DELETE /api/dados?modo=tudo` exige `{ confirmacao: "EXCLUIR TUDO" }` no corpo, além da senha do
-  app — a UI já envia isso automaticamente no segundo clique de confirmação.
+  app. A tela só envia a frase **depois que a pessoa a digita** — até 2026-09-23 ela a enviava
+  sozinha no segundo clique. É decisão revista sem evidência nova, por reavaliação; o registro e o
+  porquê estão em ARCHITECTURE.md §9.
 - **O acesso é uma credencial única de DUAS partes (`APP_EMAIL` + `APP_PASSWORD`), não contas de usuário.** Não há tabela de usuários, cadastro nem trilha de "quem fez o quê" — duas pessoas com a mesma credencial são indistinguíveis. Multi-usuário de verdade é reescrita do modelo de segurança (PLANEJAMENTO.md §5.7), não incremento. O segredo que assina a sessão deriva das duas partes, então trocar qualquer uma encerra as sessões abertas.
 - **O cookie de sessão é assinado (`lib/sessao.ts`) — não reintroduza um valor constante.** Ele já
   foi a string literal `'1'`, e o gate aceitava qualquer requisição que a trouxesse: `curl -H
@@ -592,6 +674,11 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   O comportamento sem `APP_PASSWORD` espelha `proxy.ts` de propósito (dev libera, produção recusa);
   divergir criaria página que abre com botões que não funcionam.
 - Comparação de senha em `api/login/route.ts` usa `crypto.timingSafeEqual` (constant-time).
+- **`POST /api/logout` é pública no proxy, de propósito** — só apaga o cookie de quem chama. Com
+  ela protegida, "Sair" com a sessão vencida caía num 404 em texto. É POST, nunca GET (o prefetch
+  do `Link` dispararia um link de saída). O nome do cookie é `COOKIE_SESSAO` (`lib/sessao.ts`),
+  usado por quem grava, valida e apaga — não reescreva o literal.
+- `/icon.svg` fica fora do `matcher` do proxy, como o favicon: é arte estática.
 - Login tem rate limiting em memória (10 tentativas / 5 min / IP), com a mecânica em
   `lib/rate-limit.ts` — não sobrevive a restart nem é compartilhado entre instâncias; ok para o
   deploy de instância única atual, revisar se isso mudar. As entradas expiradas são expurgadas:
@@ -614,6 +701,12 @@ de commit; ele envelheceu em dias e só servia para induzir erro.
 
 Único fato histórico que vale guardar: se um `src/middleware.ts` vazio reaparecer, ele conflita com
 `src/proxy.ts` (o arquivo real e funcional no Next 16) e deve ser removido — já aconteceu antes.
+
+E o caso oposto, que parece o mesmo e não é: **editar `src/proxy.ts` com o `next dev` no ar faz o
+servidor responder 500 em toda rota com `Could not parse module '[project]/src/middleware.ts',
+file not found`**. Não falta arquivo nenhum — é o recarregamento do Turbopack (Next 16.2.12).
+Reinicie o `next dev`. **Não crie `src/middleware.ts` para "resolver"**: ele conflitaria com o
+proxy. Reproduzido duas vezes em 2026-09-23.
 
 ---
 

@@ -5,7 +5,7 @@ import { cookies } from 'next/headers';
 import { supabase } from '@/lib/supabase';
 import { gravar, ler } from '@/lib/supabase-io';
 import { calcularSilenciadoAte } from '@/lib/prioridade';
-import { sessaoValida } from '@/lib/sessao';
+import { COOKIE_SESSAO, sessaoValida } from '@/lib/sessao';
 import { credenciaisDoAmbiente, segredoDeSessao } from '@/lib/credenciais';
 import { StatusTitulo } from '@/types';
 
@@ -42,7 +42,7 @@ async function exigirSessao(): Promise<void> {
     return;
   }
 
-  const cookie = (await cookies()).get('atlas_auth')?.value;
+  const cookie = (await cookies()).get(COOKIE_SESSAO)?.value;
   if (!sessaoValida(segredoDeSessao(credenciais), cookie)) {
     throw new Error('Sua sessão expirou. Entre de novo para continuar.');
   }

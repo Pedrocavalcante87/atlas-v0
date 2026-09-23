@@ -55,12 +55,24 @@
 
   /* --- Semânticos de domínio --------------------------------------------
      Esta é a gramática que o usuário lê ANTES do texto. Não trocar por
-     estética: a fila inteira é interpretada por estas três cores.
-       risco    = vencido, cobrar hoje
-       atencao  = vence em breve, preventivo
+     estética: a fila inteira é interpretada por estas cores, e elas formam
+     uma ESCALA DE URGÊNCIA — a mesma em toda tela (fonte única da tradução
+     categoria → cor: `tomDaCategoria`, em components/ui/Badge.tsx):
+       risco    = atraso longo (mais de 7 dias); fora da fila, erro que
+                  impede a operação
+       atencao  = atraso leve (1 a 7 dias); fora da fila, aviso que pede
+                  cuidado (duplicata, prévia ainda não gravada)
+       neutro   = ainda não venceu, ou estado sem urgência própria
+                  (promessa, sem resposta) — usa os tokens de superfície
        marca    = pago / dinheiro recuperado
+     "A vencer" é NEUTRO, não âmbar: nada está atrasado ainda. A versão
+     anterior desta nota dizia "atencao = vence em breve" enquanto a tabela
+     pintava de âmbar o atraso leve; a tela aprovada era a da tabela, e o
+     texto é que estava errado.
      Tons dessaturados de propósito — vermelho vivo numa lista inteira de
-     inadimplentes vira ruído e para de significar urgência. */
+     inadimplentes vira ruído e para de significar urgência. Para TEXTO
+     pequeno sobre fundo claro use o degrau 700 (o 600 do âmbar fica em
+     4,45:1, abaixo do mínimo AA de 4,5:1). */
   --color-risco-50:  #fdf3f2;
   --color-risco-100: #fbe3e1;
   --color-risco-200: #f6cbc7;
@@ -85,7 +97,14 @@
   --color-borda-forte:        #c5cdd9;
   --color-texto:              #16203a;
   --color-texto-suave:        #556174;
-  --color-texto-fraco:        #98a3b5;
+  /* Terceiro nível de texto — notas, datas, rótulos de apoio. Era #98a3b5
+     (tinta-400), que media 2,55:1 sobre branco e 2,42:1 sobre o fundo da
+     página: reprovado no mínimo AA (4,5:1 para texto, 3:1 para ícone) em
+     trinta e um lugares, inclusive nos ícones de ação da fila. Medido:
+     5,00:1 sobre superficie, 4,75:1 sobre superficie-sutil, 4,62:1 sobre
+     linha-hover. Sobre superficie-afundada fica em 4,42:1 — não use este
+     token ali. */
+  --color-texto-fraco:        #647085;
   /* Fundo de cabeçalho de tabela e de linha sob o cursor. Separados dos
      demais porque mudam juntos e com frequência ao calibrar densidade. */
   --color-cabecalho:          #f8f9fb;
@@ -153,6 +172,22 @@
   --text-cifra: 22px;
   --text-cifra--line-height: 26px;
   --text-cifra--letter-spacing: -0.02em;
+
+  /* --- Movimento ---------------------------------------------------------
+     Um só: a entrada do aviso flutuante. Curto e sem "quique" — é um
+     registro financeiro sendo confirmado, não uma celebração. Quem usa
+     aplica com `motion-safe:`, para respeitar quem pediu menos movimento. */
+  --animate-entrar: entrar 160ms ease-out;
+  @keyframes entrar {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------------

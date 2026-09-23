@@ -2,7 +2,7 @@
 
 > Uma planilha de títulos em aberto entra. A resposta de **quem cobrar hoje, e o que mandar** sai.
 
-`Next.js 16 (App Router)` · `React 19` · `TypeScript` · `Tailwind CSS v4` · `Supabase/PostgreSQL` · `Vitest — 202 casos`
+`Next.js 16 (App Router)` · `React 19` · `TypeScript` · `Tailwind CSS v4` · `Supabase/PostgreSQL` · `Vitest — 246 casos`
 
 ---
 
@@ -16,8 +16,12 @@ em módulos testados, e as decisões difíceis estão documentadas junto do cód
 O que este repositório tenta demonstrar, além de "funciona":
 
 - **Domínio separado de I/O.** Priorização, ciclo de vida do título, parsing de CSV e apuração de
-  receita são funções puras — por isso 202 testes rodam em ~2s sem banco, sem browser e sem mock
+  receita são funções puras — por isso 246 testes rodam em ~2s sem banco, sem browser e sem mock
   de framework.
+- **Interface que diz a verdade e funciona para quem a opera.** Registro de pagamento pede
+  confirmação com o valor; cada linha da fila diz quando o cliente foi contatado pela última vez;
+  sessão expirada e queda de rede viram mensagem, nunca botão travado. Contraste AA, navegação
+  por teclado e fila que cabe numa tela de celular.
 - **Modos de falha tratados como funcionalidade.** Banco fora do ar não vira "lista vazia"; valor
   ambíguo na planilha não vira cobrança errada; ausência de senha em produção não vira app aberto.
 - **Decisões registradas, não só implementadas.** Cada escolha não-óbvia tem o porquê escrito no
@@ -93,6 +97,8 @@ O cookie não guarda a senha: ele carrega uma data de validade e uma assinatura 
 
 O login tem limite de **10 tentativas por IP a cada 5 minutos**; passando disso, a resposta é 429 até a janela expirar. A comparação de e-mail e senha é feita em tempo constante, e as duas sempre rodam — encerrar na primeira falha faria o tempo de resposta revelar que o e-mail estava certo.
 
+**Sair** fica no canto direito da barra superior e encerra a sessão **neste navegador**. Como não existe lista de sessões no servidor, ele não derruba a sessão em outros aparelhos; para isso, troque o e-mail ou a senha.
+
 > **Para testadores:** em desenvolvimento local sem credencial configurada, o login é ignorado e você entra direto. Em produção sem credencial o app responde 503 em vez de liberar o acesso.
 
 ---
@@ -114,6 +120,10 @@ O login tem limite de **10 tentativas por IP a cada 5 minutos**; passando disso,
 > aparecer "—", a apuração não pôde ser feita (normalmente falta rodar a migration do banco) —
 > o Atlas mostra um traço em vez de R$ 0,00 de propósito, porque zero seria uma afirmação falsa.
 
+**A cor segue uma escala de urgência, a mesma em todas as telas:** vermelho = atraso longo (mais
+de 7 dias), âmbar = atraso leve (1 a 7 dias), neutro = ainda não venceu, verde = pago ou
+recuperado.
+
 **Seções da fila:**
 
 - **Vencidos — cobrar hoje**: títulos já passados do vencimento, ordenados por prioridade (quem está há mais tempo com valor maior aparece primeiro).
@@ -123,15 +133,19 @@ O login tem limite de **10 tentativas por IP a cada 5 minutos**; passando disso,
 
 **A fila é uma tabela, com uma linha por cliente — não por título.** Se um cliente tem 3 títulos em aberto, ele aparece uma única vez na lista — cobrar a pessoa, não cada título isolado, evita mandar várias mensagens separadas pra mesma pessoa no mesmo dia.
 
-**Cada linha mostra:** nome do cliente (clicável → histórico), telefone, valor total em aberto, maior atraso e quantidade de títulos. À direita ficam três ações padronizadas em ícone: **enviar pelo WhatsApp** (abre a conversa com a mensagem pronta e registra o envio), **ligar** (abre o discador) e **marcar como pago**.
+**Cada linha mostra:** nome do cliente (clicável → histórico), telefone, valor total em aberto, maior atraso e quantidade de títulos. Logo abaixo do nome aparece **quando foi o último contato** ("Contatado hoje às 10:32", "Último contato há 3 dias") e, se o título voltou para a fila, **por quê** ("promessa de 12/09 vencida", "voltou após sem resposta"). O cabeçalho de cada seção conta os clientes e mostra quantos **já foram contatados hoje** — o título continua na fila depois do envio, e é isso que evita cobrar a mesma pessoa duas vezes no dia.
+
+À direita ficam três ações padronizadas em ícone: **enviar pelo WhatsApp** (abre a conversa com a mensagem pronta e registra o envio), **ligar** (abre o discador) e **marcar como pago**. Marcar como pago **pede confirmação**, dizendo o valor: é o único resultado sem volta, e a tela não oferece desfazer.
 
 **Ao expandir a linha** (seta à esquerda) aparecem:
 
 - A **mensagem de cobrança consolidada**, gerada automaticamente (texto pronto para copiar ou enviar)
-- Botão **"Enviar via WhatsApp"** — abre o WhatsApp com a mensagem consolidada preenchida e registra o envio em todos os títulos em aberto daquele cliente
-- Uma lista compacta com cada título individual do cliente: valor, badge de dias em atraso/a vencer, e seus próprios botões de resultado — **Pago**, **Prometeu pagar**, **Sem resposta** — porque o cliente pode pagar um título e não outro
+- Botões **"Enviar pelo WhatsApp"** — abre o WhatsApp com a mensagem consolidada preenchida e registra o envio em todos os títulos em aberto daquele cliente — e **"Ligar"**, com o número
+- Uma lista compacta com cada título individual do cliente: valor, data de vencimento, situação e seus próprios botões de resultado — **Pago** (com confirmação), **Prometeu pagar** (pede a data, que não pode estar no passado) e **Sem resposta** — porque o cliente pode pagar um título e não outro
 
-Ao registrar um resultado, aquele título some da lista do dia. A linha do cliente continua aparecendo enquanto ele tiver outros títulos pendentes.
+Ao registrar um resultado, aquele título some da lista do dia na hora, e um **aviso no canto da tela** confirma o que foi gravado ("Fulano: pagamento de R$ 500,00 registrado."). A linha do cliente continua aparecendo enquanto ele tiver outros títulos pendentes.
+
+**No celular** a fila não rola para os lados: valor e atraso descem para baixo do nome, e as três ações continuam à vista.
 
 Se o resultado foi **prometeu pagar** ou **sem resposta**, o título não foi encerrado — ele volta à lista depois (na data prometida, ou passados alguns dias de silêncio) marcado com o motivo do retorno, para você saber que já falou com essa pessoa. Só **pago** encerra um título de vez.
 
@@ -143,9 +157,9 @@ Tela para subir um arquivo CSV com os títulos de cobrança.
 
 **Como funciona o upload (duas etapas — prévia e confirmação):**
 
-1. Você seleciona o arquivo `.csv`. O sistema mostra um preview local instantâneo (linhas detectadas e separador).
+1. Você arrasta o arquivo `.csv` para a tela ou clica para escolher. O sistema mostra um preview local instantâneo (linhas detectadas e separador). Planilha do Excel (`.xlsx`) é recusada na hora, com a instrução de salvar como CSV; `.txt` com separador é aceito.
 2. Ao clicar em **"Analisar planilha"**, o arquivo é processado no servidor — mas **nada é gravado no banco ainda**. Essa etapa é só leitura: valida cada linha, detecta duplicatas contra o que já existe no sistema e monta uma prévia.
-3. A prévia mostra: quantos títulos estão prontos pra importar, quantas duplicatas e linhas ignoradas, quais colunas foram identificadas, o separador detectado, e uma **análise financeira** do que seria importado (quanto já está vencido, quanto vence em até 3 dias, quanto é vencimento futuro).
+3. A prévia mostra: quantos títulos estão prontos pra importar, quantas duplicatas e linhas ignoradas, quais colunas foram identificadas, o separador detectado, uma **análise financeira** do que seria importado (quanto já está vencido, quanto vence em até 3 dias, quanto é vencimento futuro) e uma **amostra das primeiras linhas como o sistema as leu** — cliente, telefone, valor e vencimento. A amostra é o lugar de perceber, antes de gravar, um valor ou uma data lidos errado.
 4. Você revisa e só então clica em **"Confirmar importação"** — é nesse momento que clientes e títulos são de fato gravados no banco. A checagem de duplicata é refeita nesse passo por segurança.
 5. O relatório final mostra quantos títulos foram importados, duplicatas ignoradas e eventuais erros de gravação.
 
@@ -162,6 +176,11 @@ Tela para subir um arquivo CSV com os títulos de cobrança.
 No caso vermelho a tela informa quantos títulos chegaram a ser gravados antes da queda e avisa que
 **reimportar o mesmo arquivo é seguro**: o que já entrou é reconhecido como duplicata e não entra
 duas vezes.
+
+Se a confirmação falhar antes de gerar relatório, o aviso aparece **na própria prévia**, logo acima
+do botão, e diz o que se sabe sobre o banco. Sessão expirada garante que nada foi gravado, e a tela
+oferece entrar de novo. Queda de conexão não garante nada, e o texto manda conferir a lista do dia
+antes de reimportar.
 
 **O sistema é flexível no reconhecimento de colunas.** Ele aceita muitos nomes diferentes para cada campo — útil para planilhas exportadas de diferentes ERPs ou sistemas. Colunas que ele não conhece (CPF, endereço, vendedor, observações) são simplesmente ignoradas.
 
@@ -233,12 +252,12 @@ Maria Souza,21988880000,320,2026-08-20
 
 ### 4. Histórico do Cliente (`/clientes/[id]`)
 
-Tela acessada ao clicar no nome de um cliente na lista do dia. Mostra:
+Tela acessada ao clicar no nome de um cliente na lista do dia. É só de consulta — o resultado se registra na lista do dia. Mostra:
 
-- Nome, telefone e totais (quanto está em aberto e quanto já foi pago).
+- Nome, telefone, último contato e totais (quanto está em aberto e quanto já foi pago).
 - Todos os títulos do cliente, do mais recente para o mais antigo.
-- Para cada título: valor, data de vencimento, status atual e (se houver) data de promessa de pagamento.
-- **Linha do tempo de interações** de cada título: data/hora, mensagem enviada e resultado registrado.
+- Para cada título: valor, data de vencimento, situação atual com data ("pago em 21/09", "promessa para 30/09", "sem resposta · volta em 26/09") e, se ainda é devido, a urgência na mesma escala de cor da fila.
+- **Linha do tempo de interações** de cada título: data e hora, resultado registrado e mensagem enviada.
 
 ---
 
@@ -262,7 +281,9 @@ Painel administrativo com visão geral do banco de dados e opções de limpeza. 
 | Limpar títulos pagos | **Apenas** títulos já pagos, com o histórico de interações deles. Títulos aguardando follow-up (promessa ou sem resposta) são preservados — continuam sendo dívida em aberto. |
 | Limpar tudo | Remove absolutamente todos os dados (clientes, títulos, interações). O sistema volta ao estado inicial. |
 
-> ⚠️ Ambas as ações são **irreversíveis**. Há uma etapa de confirmação antes de executar.
+> ⚠️ Ambas as ações são **irreversíveis**. Há uma etapa de confirmação antes de executar, que diz
+> exatamente o que vai sumir ("Remove 11 clientes, 11 títulos e 3 interações"). **Limpar tudo**
+> só libera o botão depois que você digita `EXCLUIR TUDO`.
 >
 > Atenção ao "Limpar títulos pagos": apagar um título pago também apaga o registro de que ele foi
 > recuperado, então o valor sai da apuração dos últimos 30 dias. Use com parcimônia se quiser
@@ -275,6 +296,9 @@ leitura e clicar em "Limpar tudo" logo abaixo achando que não havia nada a perd
 
 Se uma exclusão falhar no meio, a mensagem é vermelha e avisa que parte dos dados pode ter sido
 removida — nunca verde de sucesso.
+
+Se a sessão tiver expirado, a tela diz isso e oferece entrar de novo, sem mostrar número nem ação
+de limpeza.
 
 ---
 
@@ -330,8 +354,12 @@ Quando um cliente tem mais de um título em aberto, o sistema não manda uma men
 > **Cobrança é um processo, não um evento.** Nenhuma dívida some da operação permanentemente sem
 > ter sido paga. Se o cliente prometeu pagar dia 20, o título reaparece na lista no dia 20; se não
 > respondeu, reaparece depois de alguns dias para uma nova tentativa. Quando um título volta, ele
-> vem marcado com o motivo ("prometeu e não pagou" / "sem resposta antes") para você saber que já
-> falou com essa pessoa.
+> vem marcado com o motivo ("promessa de 20/09 vencida" / "voltou após sem resposta") para você
+> saber que já falou com essa pessoa.
+>
+> Uma promessa **para o próprio dia** não tira o título da lista: a data já chegou, e ele fica à
+> vista, marcado "promessa para hoje", para você conferir o pagamento. A tela não aceita promessa
+> com data no passado.
 
 Toda mudança de status é registrada como uma **interação**, que fica salva no histórico do cliente.
 
@@ -346,7 +374,7 @@ clientes
   id           UUID (PK)
   nome         TEXT
   telefone     TEXT (único — chave de upsert no CSV)
-  criado_em    TIMESTAMP
+  criado_em    TIMESTAMP   (sem fuso, gravado em UTC)
 
 titulos
   id               UUID (PK)
@@ -358,15 +386,20 @@ titulos
   silenciado_ate   DATE        (nullable — status 'sem_resposta': fora da fila até aqui)
   resolvido_em     TIMESTAMPTZ (nullable — preenchido só ao virar 'pago';
                                 é a fonte da métrica de receita recuperada)
-  criado_em        TIMESTAMP
+  criado_em        TIMESTAMP   (sem fuso, gravado em UTC)
 
 interacoes
   id               UUID (PK)
   titulo_id        UUID (FK → titulos, ON DELETE CASCADE)
   mensagem_enviada TEXT
-  data_envio       TIMESTAMP
+  data_envio       TIMESTAMP   (sem fuso, gravado em UTC)
   resultado        TEXT
 ```
+
+> As colunas `TIMESTAMP` **não guardam fuso**: o Postgres do Supabase as preenche em UTC, e o
+> banco as devolve sem o `Z` do fim. Lidas direto, elas aparecem como hora local — o histórico
+> chegou a mostrar as interações três horas adiantadas. O app converte na exibição
+> (`lib/format.ts::instanteDoBanco`). `resolvido_em` é `TIMESTAMPTZ` e não tem esse problema.
 
 **Índice que carrega uma regra de negócio:**
 
@@ -393,7 +426,7 @@ uma cobrança nova.
 | Banco de dados | Supabase (PostgreSQL) com RLS habilitado, acessado só pelo servidor |
 | Parse de CSV | PapaParse |
 | Autenticação | E-mail + senha (credencial única) · cookie HTTP-only assinado (HMAC-SHA256), verificado no Proxy |
-| Testes | Vitest — 202 casos em 8 arquivos: domínio, política de I/O e sessão |
+| Testes | Vitest — 246 casos em 11 arquivos: domínio, política de I/O, sessão, leitura de resposta no navegador e formatação de exibição |
 
 ---
 
@@ -499,7 +532,7 @@ Tudo abaixo roda em repositório recém-clonado, **sem `.env.local` e sem Supaba
 
 ```bash
 npm install
-npm run test        # 8 arquivos, 202 casos — deve passar em ~2s
+npm run test        # 11 arquivos, 246 casos — deve passar em ~2s
 npm run lint        # sem saída = sem problema
 npx tsc --noEmit    # sem saída = sem erro de tipo
 npm run build       # build de produção completo
@@ -508,8 +541,8 @@ npm run build       # build de produção completo
 Saída esperada do `npm run test`:
 
 ```
- Test Files  8 passed (8)
-      Tests  202 passed (202)
+ Test Files  11 passed (11)
+      Tests  246 passed (246)
 ```
 
 ### 1. Testes automatizados
@@ -524,7 +557,10 @@ estão em funções puras em `src/lib`, e as rotas apenas as chamam.
 | `src/lib/prioridade.test.ts` | 38 | Dias de atraso, categorização, score, agrupamento por cliente e o ciclo de vida (`estaNaFilaHoje`): quando promessa e silêncio devolvem o título à fila |
 | `src/lib/sessao.test.ts` | 25 | Cookie de sessão: assinatura válida, recusa de valor forjado ou adulterado, expiração verificada no servidor, vínculo com o segredo |
 | `src/lib/supabase-io.test.ts` | 20 | Política de acesso ao banco: prazo (timeout), classificação de falha de infraestrutura, paginação que busca **todas** as páginas |
+| `src/lib/resposta-http.test.ts` | 16 | Como o navegador lê a resposta de uma rota: sessão expirada (o desvio para `/login` chega como 200 com HTML), queda de rede e corpo que não é JSON nunca viram sucesso nem botão travado |
+| `src/lib/format.test.ts` | 15 | Formatação de exibição: plural, telefone, datas sem passar por fuso, `timestamp` do banco lido como UTC, rótulo de vencimento |
 | `src/lib/importacao.test.ts` | 14 | Gravação do lote: caminho normal, conflito de unicidade (duas importações simultâneas) e falhas que não são conflito |
+| `src/lib/contato.test.ts` | 13 | Último contato por cliente, o rótulo "hoje às 10:32" / "há 3 dias" e o de retorno à fila (promessa para hoje não é "vencida") |
 | `src/lib/recuperacao.test.ts` | 10 | Janela de 30 dias e soma da receita recuperada |
 | `src/lib/credenciais.test.ts` | 9 | Normalização de e-mail e derivação do segredo de sessão a partir das duas partes |
 | `src/lib/rate-limit.test.ts` | 9 | Contagem dentro da janela, expiração e expurgo de entradas velhas (o "agora" é parâmetro, então o teste acerta o relógio) |
@@ -538,7 +574,9 @@ npx vitest            # watch
 
 **O que a suíte não cobre, de propósito:** componentes React, route handlers e a integração real
 com o Supabase. Essa parte é verificada pelo roteiro manual abaixo — o que significa que uma
-mudança em tela ou rota **precisa** ser testada à mão antes de ser considerada pronta.
+mudança em tela ou rota **precisa** ser testada à mão antes de ser considerada pronta. Mudança de
+interface também se confere **visualmente**, no desktop e numa largura de celular (375px), sem
+rolagem para os lados.
 
 ### 2. Dados de exemplo inclusos
 
@@ -592,23 +630,32 @@ estado uns para os outros.
    confirmaria que o e-mail existe).
 3. Acerte e-mail e senha → entra na lista do dia.
 4. Recarregue a página → continua logado (cookie de 30 dias).
+5. Clique em **"Sair"**, no canto direito da barra → volta ao login, e abrir `/` de novo exige
+   login.
 
-✅ **Passou se:** nenhuma rota do app abre sem login, e o erro não diferencia e-mail de senha.
+✅ **Passou se:** nenhuma rota do app abre sem login, o erro não diferencia e-mail de senha, e
+"Sair" encerra a sessão.
 
 #### Cenário 1 — Fluxo completo
 
-1. Vá em **"+ Importar CSV"** e selecione `teste_varejo.csv`.
+1. Clique em **"Importar planilha"**, na barra superior, e arraste ou selecione `teste_varejo.csv`.
 2. Clique em **"Analisar planilha"**. Confira a prévia contra a tabela da seção anterior:
-   11 prontos, 2 ignorados, separador `;`, colunas identificadas. **Nada foi gravado ainda.**
-3. Clique em **"Confirmar importação"** → o relatório deve informar 11 títulos importados.
+   11 prontos, 2 ignorados, separador `;`, colunas identificadas, e a amostra com os valores e as
+   datas lidos. **Nada foi gravado ainda.**
+3. Clique em **"Confirmar importação de 11 títulos"** → o relatório deve informar 11 títulos
+   importados.
 4. Vá para a **Lista do dia** e confira que os clientes aparecem na seção correta e ordenados por
    prioridade (maior `dias × valor` no topo, entre os vencidos).
 5. Expanda uma linha → a mensagem deve citar o primeiro nome, o valor formatado em R$ e os dias de
    atraso. Cliente com mais de um título deve ter **uma** mensagem consolidada citando todos.
-6. Clique em **enviar pelo WhatsApp** → abre o WhatsApp Web/app com o texto preenchido.
-7. Volte ao Atlas e registre **"Pago"** num título → aquele título some; a linha do cliente
-   continua se ele ainda tiver outros.
-8. Registre **"Prometeu pagar"** → deve pedir uma data antes de confirmar.
+6. Clique em **enviar pelo WhatsApp** → abre o WhatsApp Web/app com o texto preenchido. De volta ao
+   Atlas, a linha passa a dizer **"Contatado hoje às HH:MM"**, e o cabeçalho da seção, quantos já
+   foram contatados hoje.
+7. Registre **"Pago"** num título → a tela pede confirmação dizendo o valor. Confirme → aquele
+   título some, e um aviso no canto confirma o registro; a linha do cliente continua se ele ainda
+   tiver outros.
+8. Registre **"Prometeu pagar"** → deve pedir uma data antes de confirmar, e recusar data no
+   passado.
 9. Registre **"Sem resposta"** → some sem pedir data.
 
 ✅ **Passou se:** os números do relatório batem com a prévia, a ordenação respeita a prioridade e
@@ -646,8 +693,12 @@ cada resultado registrado remove só o título certo.
 
 #### Cenário 5 — Ciclo de vida: nada some sem ser pago
 
-1. Registre **"Prometeu pagar"** num título com a data de **ontem**.
-2. Recarregue a lista do dia → o título **reaparece**, marcado com "prometeu e não pagou".
+1. Registre **"Prometeu pagar"** num título com a data de **hoje** → ele **continua na lista**,
+   marcado "promessa para hoje": a data chegou, e o título fica à vista para você conferir o
+   pagamento. (A tela não aceita data no passado.)
+2. Para ver uma promessa **quebrada** sem esperar, registre para amanhã e ajuste `data_promessa`
+   direto no banco para ontem. Recarregue a lista → o título **reaparece**, marcado "promessa de
+   DD/MM vencida".
 3. Registre **"Sem resposta"** → sai da lista. Ele volta sozinho em 3 dias (para conferir sem
    esperar, ajuste `silenciado_ate` direto no banco).
 4. Registre **"Pago"** → sai da lista e **não volta mais**.
@@ -658,8 +709,10 @@ cada resultado registrado remove só o título certo.
 #### Cenário 6 — Limpeza de dados
 
 1. Acesse **"Dados"** e confira os números contra o que você importou.
-2. **"Limpar títulos pagos"** → só os pagos somem; promessa e sem resposta permanecem.
-3. **"Limpar tudo"** → o sistema volta ao estado inicial.
+2. **"Limpar títulos pagos"** → a confirmação diz quantos títulos saem; só os pagos somem, e
+   promessa e sem resposta permanecem.
+3. **"Limpar tudo"** → o botão só libera depois que você digita `EXCLUIR TUDO`; o sistema volta ao
+   estado inicial.
 
 ✅ **Passou se:** a limpeza parcial preserva o que ainda é dívida em aberto.
 
@@ -709,6 +762,21 @@ NEXT_PUBLIC_SUPABASE_URL=https://host-que-nao-existe.supabase.co
 - **Upload:** se a queda acontecer no meio da gravação, o relatório fica vermelho, informa quantos
   títulos entraram antes da falha e avisa que reimportar o arquivo é seguro.
 
+#### Sessão expirada e rede fora do ar no meio do uso
+
+A sessão pode vencer com a tela aberta, e a conexão pode cair. Para provocar, use as ferramentas
+de desenvolvedor do navegador: apague o cookie `atlas_auth` (aba Aplicativo › Cookies) ou ative o
+modo offline (aba Rede).
+
+**Esperado:**
+
+- **Importar planilha:** "Analisar planilha" mostra a mensagem e **volta ao normal** — antes ficava
+  em "Analisando…" para sempre. Na confirmação, o aviso aparece **na própria prévia**; com sessão
+  expirada ele garante que nada foi gravado e oferece "Entrar de novo".
+- **`/dados`:** "Sessão expirada", com "Entrar de novo" — **sem** números e **sem** os botões de
+  limpeza.
+- **Login com a rede fora:** mensagem de falha de conexão, e o botão volta a "Entrar".
+
 #### Produção sem credencial
 
 ```bash
@@ -730,7 +798,7 @@ correto: zero seria uma afirmação falsa sobre dinheiro.
 
 | # | Verificação | Como |
 |---|---|---|
-| 1 | Suíte automatizada verde | `npm run test` → 202/202 |
+| 1 | Suíte automatizada verde | `npm run test` → 246/246 |
 | 2 | Lint e tipos limpos | `npm run lint` · `npx tsc --noEmit` |
 | 3 | Build de produção | `npm run build` |
 | 4 | Login exigido em toda rota | Cenário 0 |
@@ -743,6 +811,11 @@ correto: zero seria uma afirmação falsa sobre dinheiro.
 | 11 | Limpeza parcial preserva dívida aberta | Cenário 6 |
 | 12 | Cookie forjado não entra | Modos de falha |
 | 13 | Banco fora do ar não vira lista vazia | Modos de falha |
+| 14 | Sessão expirada e rede fora viram mensagem, não botão travado | Modos de falha |
+| 15 | "Sair" encerra a sessão | Cenário 0, passo 5 |
+| 16 | "Pago" pede confirmação com o valor | Cenário 1, passo 7 |
+| 17 | Quem já foi contatado hoje continua marcado depois de recarregar | Cenário 1, passo 6 |
+| 18 | Telas cabem em 375px sem rolagem para os lados | Ferramentas do navegador, modo dispositivo |
 
 ---
 
@@ -756,19 +829,26 @@ src/
 │   ├── upload/page.tsx        # Importar CSV (prévia + confirmação)
 │   ├── dados/page.tsx         # Gerenciar dados
 │   ├── clientes/[id]/page.tsx # Histórico do cliente
-│   ├── globals.css            # Sistema visual: tokens de cor, tipografia e superfície
+│   ├── {login,upload,dados}/layout.tsx  # Só o título da aba (página Client Component não exporta metadata)
+│   ├── layout.tsx             # Casca: barra, "pular para o conteúdo", avisos flutuantes, título por aba
+│   ├── loading.tsx · error.tsx · not-found.tsx  # Carregamento, erro inesperado e 404 próprios
+│   ├── icon.svg               # Ícone da aba (símbolo do Atlas)
+│   ├── globals.css            # Sistema visual: tokens de cor, tipografia, superfície e movimento
 │   └── api/
 │       ├── login/route.ts                # Autenticação (rate limit + comparação constant-time)
+│       ├── logout/route.ts               # Sair: apaga o cookie deste navegador (POST, pública no proxy)
 │       ├── upload-csv/route.ts           # Prévia do CSV (só leitura, não grava nada)
 │       ├── upload-csv/confirmar/route.ts # Confirmação — grava clientes e títulos no banco
 │       └── dados/route.ts                # Estatísticas e limpeza
 ├── components/
 │   ├── FilaCobranca.tsx       # A fila como <table> — uma seção (vencidos / a vencer)
-│   ├── ClienteLinha.tsx       # Linha do cliente: totais, ações e expansão com os títulos
-│   ├── Navbar.tsx             # Barra de navegação
+│   ├── ClienteLinha.tsx       # Linha do cliente: totais, último contato, ações e expansão com os títulos
+│   ├── Avisos.tsx             # Avisos flutuantes de registro (provedor no layout)
+│   ├── Navbar.tsx             # Barra de navegação, com "Sair"; no celular, só ícones
 │   ├── NavbarWrapper.tsx      # Oculta a navbar na tela de login
 │   ├── Marca.tsx              # Símbolo e logotipo do Atlas
-│   └── ui/                    # Primitivas visuais: Botao, BotaoIcone, Badge, Icone, KpiCard
+│   └── ui/                    # Primitivas: Pagina, CabecalhoPagina, Painel, Aviso, KpiCard, Badge,
+│                              #   Botao, BotaoIcone, Icone
 ├── lib/
 │   ├── supabase.ts            # Cliente do banco (service_role, lazy, só no servidor)
 │   ├── supabase-io.ts         # Política de acesso: prazo, falha de dependência, paginação
@@ -780,8 +860,10 @@ src/
 │   ├── sessao.ts              # Valor de cookie assinado (HMAC) com expiração verificada
 │   ├── rate-limit.ts          # Limitador de tentativas por chave, com "agora" injetável
 │   ├── templates.ts           # Mensagens de cobrança (individuais e consolidadas)
-│   ├── format.ts              # Formatação de moeda compartilhada
-│   └── *.test.ts              # Os 8 arquivos de teste, ao lado do código que testam
+│   ├── format.ts              # Formatação de exibição: moeda, plural, datas, hora vinda do banco
+│   ├── contato.ts             # Último contato por cliente e rótulo de retorno à fila
+│   ├── resposta-http.ts       # Como o navegador lê a resposta de uma rota (sessão, rede, corpo)
+│   └── *.test.ts              # Os 11 arquivos de teste, ao lado do código que testam
 ├── actions/
 │   └── index.ts               # Server Actions: registrar envio e atualizar status
 ├── types/
@@ -819,6 +901,11 @@ está nos comentários de cabeçalho desses arquivos e em [ARCHITECTURE.md](ARCH
 | **A fila é uma `<table>` de verdade** | São dados tabulares, e o leitor de tela depende da associação célula-cabeçalho para anunciar "Valor em aberto: R$ 5.600,00" em vez de ler números soltos. | `components/FilaCobranca.tsx` |
 | **Rate limit extraído para uma lib com "agora" injetável** | O comportamento que interessa é temporal (janela expira, contagem reinicia). Dentro da rota, só seria observável subindo servidor e esperando cinco minutos. | `lib/rate-limit.ts` |
 | **Cores e tipografia em tokens semânticos** | `bg-superficie`/`text-risco` em vez de `bg-white`/`text-red-600` permite mudar identidade, adicionar tema escuro ou um segundo domínio sem caçar classe por classe. | `app/globals.css` |
+| **A cor é uma escala de urgência, a mesma em toda tela** | Vermelho = atraso longo, âmbar = atraso leve, neutro = a vencer, verde = pago. O card "A vencer" era âmbar e a linha correspondente da tabela, cinza: a mesma coisa em duas cores. O texto secundário foi medido e passa no contraste AA. | `app/globals.css`, `components/ui/Badge.tsx` |
+| **Resposta de rota lida por uma função só, no navegador** | Sem sessão, o proxy devolve a chamada de API para o login, e o navegador recebe **200 com o HTML do login**. Lido como sucesso, isso mostrava os botões de exclusão sem números; lido como JSON, travava o botão de análise para sempre. | `lib/resposta-http.ts` |
+| **"Pago" pede confirmação com o valor, em vez de oferecer desfazer** | É o único resultado sem volta. Desfazer seria edição de título, fora de escopo, e mexeria em `resolvido_em`, que sustenta a métrica de recuperado. | `components/ClienteLinha.tsx` |
+| **O último contato vem do banco, não do estado da tela** | O título continua na fila depois do envio; a única pista de envio era a cor do ícone, que sumia ao recarregar — e a mesma pessoa podia ser cobrada duas vezes no dia. | `lib/contato.ts`, `app/page.tsx` |
+| **Hora vinda do banco é lida como UTC** | As colunas `TIMESTAMP` não guardam fuso, e ler como hora local adiantava o histórico em três horas. | `lib/format.ts` |
 
 ---
 
@@ -836,7 +923,12 @@ está nos comentários de cabeçalho desses arquivos e em [ARCHITECTURE.md](ARCH
   A *leitura* é paginada internamente e sempre completa; o que não existe é limitar quantas linhas
   aparecem por vez.
 - Não é possível editar um cliente ou título já importado pela interface (nome ou telefone errado).
-  A saída é corrigir na origem e reimportar, ou alterar direto no banco.
+  A saída é corrigir na origem e reimportar, ou alterar direto no banco. Pelo mesmo motivo, um
+  resultado registrado não se desfaz pela tela — por isso "Pago" pede confirmação antes de gravar.
+- Datas e horas seguem o **relógio do servidor**: o "hoje" da fila, os dias de atraso e as horas
+  exibidas. Correto enquanto o servidor rodar no fuso da empresa; num servidor em UTC, entre 21h e
+  meia-noite de Brasília o sistema já estaria no dia seguinte.
+- Não há tema escuro. Os tokens de cor já estão organizados para recebê-lo.
 - Data ambígua entre DD/MM e MM/DD (`03/04/2026`) entra sem aviso como DD/MM. Decidir olhando a
   coluna inteira está planejado ([PLANEJAMENTO.md](PLANEJAMENTO.md) §5.3).
 

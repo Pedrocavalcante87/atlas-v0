@@ -31,6 +31,13 @@ import { createHmac, createHash, timingSafeEqual } from 'crypto';
 // sessões em curso. Antes, trocar a senha não desconectava ninguém.
 // ---------------------------------------------------------------------------
 
+/**
+ * Nome do cookie de sessão. Um lugar só: quem grava (api/login), quem valida
+ * (proxy.ts, actions) e quem apaga (api/logout) precisam concordar, e um nome
+ * divergente na saída deixaria a sessão viva com o botão dizendo que saiu.
+ */
+export const COOKIE_SESSAO = 'atlas_auth';
+
 /** Quanto tempo uma sessão vale. Espelha o `maxAge` do cookie em api/login. */
 export const DURACAO_SESSAO_MS = 30 * 24 * 60 * 60 * 1000; // 30 dias
 
