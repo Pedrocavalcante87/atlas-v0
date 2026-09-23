@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, AnchorHTMLAttributes, ReactNode } from 'react';
+import { IconeCarregando } from './Icone';
 
 // ---------------------------------------------------------------------------
 // Botão do sistema. Existe para que "qual verde?", "qual altura?" e "como fica
@@ -51,12 +52,31 @@ const BASE =
   // um botão abre demais e perde a leitura como bloco único.
   'tracking-[-0.006em] whitespace-nowrap ' +
   'transition-colors duration-100 select-none cursor-pointer ' +
-  'disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed';
+  'disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed ' +
+  // Carregando também desabilita, mas não pode parecer inativo: o botão
+  // esmaecido lia como "não dá para clicar", não como "estou trabalhando".
+  // O seletor composto é mais específico que `disabled:` e vence sem
+  // depender da ordem das classes no CSS gerado.
+  'data-[carregando]:disabled:opacity-100';
 
 function classes(variante: VarianteBotao, tamanho: TamanhoBotao, largura?: boolean, extra?: string) {
   return [BASE, VARIANTES[variante], TAMANHOS[tamanho], largura ? 'w-full' : '', extra ?? '']
     .filter(Boolean)
     .join(' ');
+}
+
+/**
+ * As classes do botão, para aplicar num elemento que não é `<button>` nem
+ * `<a>` cru — na prática, o `Link` do Next, que precisa ser ele mesmo para
+ * navegar sem recarregar a página. Mesma resposta para "qual verde?", sem
+ * copiar a lista de classes na tela (o estado vazio da home fazia isso).
+ */
+export function estiloBotao(
+  variante: VarianteBotao = 'secundario',
+  tamanho: TamanhoBotao = 'md',
+  largura?: boolean,
+) {
+  return classes(variante, tamanho, largura);
 }
 
 interface ComunsBotao {
@@ -68,6 +88,9 @@ interface ComunsBotao {
 
 type PropsBotao = ComunsBotao & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> & {
   className?: string;
+  /** Mostra o indicador de progresso e desabilita. O texto continua sendo de
+   *  quem chama ("Analisando…"), porque só ele sabe o que está acontecendo. */
+  carregando?: boolean;
 };
 
 export function Botao({
@@ -75,11 +98,20 @@ export function Botao({
   tamanho = 'md',
   largura,
   className,
+  carregando = false,
+  disabled,
   children,
   ...props
 }: PropsBotao) {
   return (
-    <button className={classes(variante, tamanho, largura, className)} {...props}>
+    <button
+      className={classes(variante, tamanho, largura, className)}
+      disabled={disabled || carregando}
+      aria-busy={carregando || undefined}
+      data-carregando={carregando || undefined}
+      {...props}
+    >
+      {carregando && <IconeCarregando className="w-3.5 h-3.5 motion-safe:animate-spin" />}
       {children}
     </button>
   );

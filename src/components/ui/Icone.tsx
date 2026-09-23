@@ -90,3 +90,80 @@ export function IconeImportar({ className = 'w-4 h-4' }: PropsIcone) {
     </svg>
   );
 }
+
+/** Alerta — erro ou aviso que pede atenção (triângulo com exclamação). */
+export function IconeAlerta({ className = 'w-4 h-4' }: PropsIcone) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M7.1 2.9a1 1 0 0 1 1.8 0l5.2 9.4a1 1 0 0 1-.9 1.5H2.8a1 1 0 0 1-.9-1.5z" />
+      <path d="M8 6.3v3.1M8 11.5h.01" />
+    </svg>
+  );
+}
+
+/** Informação — aviso neutro, sem urgência. */
+export function IconeInfo({ className = 'w-4 h-4' }: PropsIcone) {
+  return (
+    <svg {...BASE} className={className}>
+      <circle cx="8" cy="8" r="5.8" />
+      <path d="M8 7.4v3.6M8 5.2h.01" />
+    </svg>
+  );
+}
+
+/** Arquivo — planilha selecionada para importar. */
+export function IconeArquivo({ className = 'w-4 h-4' }: PropsIcone) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M4 2.2h5.1L12 5.1v8.7H4z" />
+      <path d="M9.1 2.2v2.9H12M6 8.4h4M6 10.8h4" />
+    </svg>
+  );
+}
+
+/** Voltar — link de retorno no cabeçalho de página. */
+export function IconeVoltar({ className = 'w-4 h-4' }: PropsIcone) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M12.5 8h-9M7.2 4.3 3.5 8l3.7 3.7" />
+    </svg>
+  );
+}
+
+/** Sair — encerrar a sessão neste navegador. */
+export function IconeSair({ className = 'w-4 h-4' }: PropsIcone) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M6.4 2.8H3.6a.8.8 0 0 0-.8.8v8.8a.8.8 0 0 0 .8.8h2.8" />
+      <path d="M10.2 5.2 13 8l-2.8 2.8M13 8H6.4" />
+    </svg>
+  );
+}
+
+/** Fechar / cancelar. */
+export function IconeFechar({ className = 'w-4 h-4' }: PropsIcone) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="m4.4 4.4 7.2 7.2M11.6 4.4l-7.2 7.2" />
+    </svg>
+  );
+}
+
+/** Retorno — título que voltou à fila (promessa vencida ou fim do silêncio). */
+export function IconeRetorno({ className = 'w-4 h-4' }: PropsIcone) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M3.4 8a4.6 4.6 0 1 0 1.4-3.3" />
+      <path d="M3.2 2.6v2.6h2.6" />
+    </svg>
+  );
+}
+
+/** Carregando — quem usa aplica `animate-spin` (respeitando motion-safe). */
+export function IconeCarregando({ className = 'w-4 h-4' }: PropsIcone) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M8 2.2a5.8 5.8 0 1 1-5.8 5.8" />
+    </svg>
+  );
+}
