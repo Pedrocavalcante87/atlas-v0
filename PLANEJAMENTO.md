@@ -23,11 +23,13 @@
 | **Etapa 2 — planejamento de implementação da Fase 1** | ⬜ **não iniciada, não autorizada**   | —          |
 | **Fase 1 — implementação**                            | ⬜ não planejada                      | —          |
 | Fases 2 e 3                                           | ⬜ direção esboçada, sem planejamento | —          |
+| Trilha de UI/UX (exceção pedida pelo usuário, §14)    | ✅ implementada                       | 2026-09-23 |
 
 **Próxima ação autorizada: exclusivamente a Fase 0 (§11.1).** Nenhuma alteração de código de
 produção, schema ou UI está autorizada por este documento. O plano de implementação da Fase 1
 **não deve ser escrito** antes de a Fase 0 produzir resultado e das decisões da §12 serem
-respondidas.
+respondidas. O que mudou no código fora disso foi pedido explicitamente pelo usuário e está
+registrado, com o motivo, na tabela de exceções da §14.
 
 ---
 
@@ -114,8 +116,8 @@ nem coluna.
 (`Portas`), traduz SQLSTATE 23505 como duplicata e concilia contra o banco antes de reportar perda.
 
 **Testes**: 246 casos, todos em `src/lib/` (eram ~143 quando esta seção foi escrita, em
-2026-08-12). Rotas, Server Actions e componentes seguem sem cobertura; a verificação deles é
-manual.
+2026-08-12). Rotas, Server Actions e componentes seguem sem cobertura automatizada; a verificação
+deles é manual e, para interface, também visual num navegador real (ver CLAUDE.md §Comandos).
 
 ---
 
@@ -130,7 +132,7 @@ qualquer arquitetura futura:
 
 | Invariante                                                                  | Garantido por                                                |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Falha de infraestrutura nunca vira R$ 0,00, lista vazia ou sucesso aparente | `ler`/`lerPaginado` lançam; rotas devolvem 503; nunca `?? 0` |
+| Falha de infraestrutura nunca vira R$ 0,00, lista vazia ou sucesso aparente | `ler`/`lerPaginado` lançam; rotas devolvem 503; nunca `?? 0`; no navegador, `lib/resposta-http.ts` não lê o HTML do login nem a rede fora como sucesso |
 | Falha de infraestrutura nunca é apresentada como erro do dado do usuário    | `ehFalhaDeInfraestrutura` + `resultado: 'indisponivel'`      |
 | Número de dinheiro nunca é inventado (`null` → "—", jamais zero)            | `totalRecuperado` devolve `null`; a UI mostra traço          |
 | Leitura de lista é completa ou é erro — nunca truncada em silêncio          | `lerPaginado` por cursor, `T extends { id: string }`         |
@@ -603,7 +605,7 @@ valendo para tudo o mais:
 | 2026-09-19 | Identidade visual própria (`globals.css`, `components/ui/`, `Marca.tsx`) | Trabalho desbloqueado sem usuários, e a tela faz parte da conversa que vai buscar os arquivos da Fase 0. O fluxo de `/upload` foi só repaginado, não redesenhado — a tela de mapeamento é o centro da Fase 1 |
 | 2026-09-19 | Login com **e-mail + senha** (`APP_EMAIL`) | Credencial de duas partes, não contas de usuário. **Não altera o §5.7**: segue mono-empresa, sem cadastro e sem auditoria |
 | 2026-09-23 | Falhas silenciosas das chamadas à API no navegador (`src/lib/resposta-http.ts`, login, `/upload`, `/dados`) | Defeito presente: sem sessão, a análise da importação travava, o erro da confirmação sumia e `/dados` mostrava os botões de exclusão sem ter lido os números. Não toca em ingestão, validação nem schema |
-| 2026-09-23 | **Trilha de evolução de UI/UX** enquanto os CSVs reais da Fase 0 não chegam: todas as telas no sistema visual, contraste AA, celular, sair, último contato na fila, confirmação do "pago", título por aba, carregamento/erro/404 | Pedido explícito do usuário: "o produto por enquanto vai ser adiantado no front end". **Fronteira respeitada**: nenhuma mudança em ingestão, validação, schema ou regra de domínio; `/upload` só repaginado — a tela de mapeamento continua sendo da Fase 1. No servidor, só a rota `/api/logout` e a leitura de `interacoes(data_envio)` na home |
+| 2026-09-23 | **Trilha de evolução de UI/UX** enquanto os CSVs reais da Fase 0 não chegam: todas as telas no sistema visual, contraste AA, celular, sair, último contato na fila, confirmação do "pago", título por aba, carregamento/erro/404 | Pedido explícito do usuário: "o produto por enquanto vai ser adiantado no front end". **Fronteira respeitada**: nenhuma mudança em ingestão, validação, schema ou regra de domínio; `/upload` só repaginado — a tela de mapeamento continua sendo da Fase 1. No servidor, só a rota `/api/logout` e a leitura de `interacoes(data_envio)` na home. **Uma decisão anterior foi revista**: a exclusão total passou a pedir a frase digitada (ARCHITECTURE.md §9) |
 
 **A restrição do §5.3 continua de pé onde importa**: nenhuma convenção de milhar/decimal foi
 escolhida por célula. A correção estrutural (decidir por coluna, com confirmação) segue sendo da

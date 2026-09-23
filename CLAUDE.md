@@ -43,9 +43,10 @@ precisa antes de tocar em qualquer coisa.
 10. **Teste o que alterar.** A suíte cobre o domínio e a política de I/O, **não** rotas, Server
     Actions nem componentes (ver §Comandos) — rode `npm run test`, `npm run lint` e
     `npx tsc --noEmit`, e valide o fluxo manualmente via `npm run dev` quando a mudança afetar UI,
-    rota ou dado. Para concorrência, indisponibilidade ou qualquer coisa que envolva o banco de
-    verdade, teste unitário **não é evidência suficiente** — este projeto já produziu defeitos que
-    só apareceram na reprodução real (ver §Descobertas empíricas).
+    rota ou dado. Mudança de interface se valida também **visualmente**, no desktop e em 375px
+    (ver §Comandos, "Validação visual existe"). Para concorrência, indisponibilidade ou qualquer
+    coisa que envolva o banco de verdade, teste unitário **não é evidência suficiente** — este
+    projeto já produziu defeitos que só apareceram na reprodução real (ver §Descobertas empíricas).
 11. **Revise criticamente depois de implementar.** Procure bug, regressão, edge case, duplicação
     nova, complexidade desnecessária e problema de segurança antes de considerar concluído.
 12. **Respeite o escopo.** Implemente o que foi pedido. Se achar problema não relacionado,
@@ -476,6 +477,7 @@ Cada um está garantido por mecanismo, não por disciplina de quem escreve o có
 | Invariante | Garantido por |
 |---|---|
 | Nenhum estado inventado quando o banco não responde | `ler`/`lerPaginado` lançam; rotas devolvem 503; nunca `?? 0` |
+| No navegador, resposta que não veio da rota — login, HTML, rede fora — nunca vira sucesso nem botão travado | `lib/resposta-http.ts::lerResposta` checa o desvio para `/login` antes do status; `chamarApi` nunca rejeita |
 | Leitura de lista é completa ou é erro — nunca truncada em silêncio | `lerPaginado` por cursor, `T extends { id: string }` |
 | No máximo um título `aberto` por (cliente, valor, vencimento) | `idx_titulos_aberto_unico` no Postgres |
 | Reimportar o mesmo arquivo não duplica cobrança | Índice único + tratamento de 23505 como duplicata |
@@ -632,7 +634,9 @@ Não são esquecimentos — foram avaliados e adiados por não serem o gargalo a
   não vazio". Se mudar o formato de uma linha em `lib/csv-import.ts::LinhaImportacao`, atualize o
   validador junto, senão a confirmação passa a rejeitar dados legítimos.
 - `DELETE /api/dados?modo=tudo` exige `{ confirmacao: "EXCLUIR TUDO" }` no corpo, além da senha do
-  app — a UI já envia isso automaticamente no segundo clique de confirmação.
+  app. A tela só envia a frase **depois que a pessoa a digita** — até 2026-09-23 ela a enviava
+  sozinha no segundo clique. É decisão revista sem evidência nova, por reavaliação; o registro e o
+  porquê estão em ARCHITECTURE.md §9.
 - **O acesso é uma credencial única de DUAS partes (`APP_EMAIL` + `APP_PASSWORD`), não contas de usuário.** Não há tabela de usuários, cadastro nem trilha de "quem fez o quê" — duas pessoas com a mesma credencial são indistinguíveis. Multi-usuário de verdade é reescrita do modelo de segurança (PLANEJAMENTO.md §5.7), não incremento. O segredo que assina a sessão deriva das duas partes, então trocar qualquer uma encerra as sessões abertas.
 - **O cookie de sessão é assinado (`lib/sessao.ts`) — não reintroduza um valor constante.** Ele já
   foi a string literal `'1'`, e o gate aceitava qualquer requisição que a trouxesse: `curl -H

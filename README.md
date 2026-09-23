@@ -354,8 +354,12 @@ Quando um cliente tem mais de um título em aberto, o sistema não manda uma men
 > **Cobrança é um processo, não um evento.** Nenhuma dívida some da operação permanentemente sem
 > ter sido paga. Se o cliente prometeu pagar dia 20, o título reaparece na lista no dia 20; se não
 > respondeu, reaparece depois de alguns dias para uma nova tentativa. Quando um título volta, ele
-> vem marcado com o motivo ("prometeu e não pagou" / "sem resposta antes") para você saber que já
-> falou com essa pessoa.
+> vem marcado com o motivo ("promessa de 20/09 vencida" / "voltou após sem resposta") para você
+> saber que já falou com essa pessoa.
+>
+> Uma promessa **para o próprio dia** não tira o título da lista: a data já chegou, e ele fica à
+> vista, marcado "promessa para hoje", para você conferir o pagamento. A tela não aceita promessa
+> com data no passado.
 
 Toda mudança de status é registrada como uma **interação**, que fica salva no histórico do cliente.
 
@@ -370,7 +374,7 @@ clientes
   id           UUID (PK)
   nome         TEXT
   telefone     TEXT (único — chave de upsert no CSV)
-  criado_em    TIMESTAMP
+  criado_em    TIMESTAMP   (sem fuso, gravado em UTC)
 
 titulos
   id               UUID (PK)
@@ -382,15 +386,20 @@ titulos
   silenciado_ate   DATE        (nullable — status 'sem_resposta': fora da fila até aqui)
   resolvido_em     TIMESTAMPTZ (nullable — preenchido só ao virar 'pago';
                                 é a fonte da métrica de receita recuperada)
-  criado_em        TIMESTAMP
+  criado_em        TIMESTAMP   (sem fuso, gravado em UTC)
 
 interacoes
   id               UUID (PK)
   titulo_id        UUID (FK → titulos, ON DELETE CASCADE)
   mensagem_enviada TEXT
-  data_envio       TIMESTAMP
+  data_envio       TIMESTAMP   (sem fuso, gravado em UTC)
   resultado        TEXT
 ```
+
+> As colunas `TIMESTAMP` **não guardam fuso**: o Postgres do Supabase as preenche em UTC, e o
+> banco as devolve sem o `Z` do fim. Lidas direto, elas aparecem como hora local — o histórico
+> chegou a mostrar as interações três horas adiantadas. O app converte na exibição
+> (`lib/format.ts::instanteDoBanco`). `resolvido_em` é `TIMESTAMPTZ` e não tem esse problema.
 
 **Índice que carrega uma regra de negócio:**
 
@@ -548,7 +557,10 @@ estão em funções puras em `src/lib`, e as rotas apenas as chamam.
 | `src/lib/prioridade.test.ts` | 38 | Dias de atraso, categorização, score, agrupamento por cliente e o ciclo de vida (`estaNaFilaHoje`): quando promessa e silêncio devolvem o título à fila |
 | `src/lib/sessao.test.ts` | 25 | Cookie de sessão: assinatura válida, recusa de valor forjado ou adulterado, expiração verificada no servidor, vínculo com o segredo |
 | `src/lib/supabase-io.test.ts` | 20 | Política de acesso ao banco: prazo (timeout), classificação de falha de infraestrutura, paginação que busca **todas** as páginas |
+| `src/lib/resposta-http.test.ts` | 16 | Como o navegador lê a resposta de uma rota: sessão expirada (o desvio para `/login` chega como 200 com HTML), queda de rede e corpo que não é JSON nunca viram sucesso nem botão travado |
+| `src/lib/format.test.ts` | 15 | Formatação de exibição: plural, telefone, datas sem passar por fuso, `timestamp` do banco lido como UTC, rótulo de vencimento |
 | `src/lib/importacao.test.ts` | 14 | Gravação do lote: caminho normal, conflito de unicidade (duas importações simultâneas) e falhas que não são conflito |
+| `src/lib/contato.test.ts` | 13 | Último contato por cliente, o rótulo "hoje às 10:32" / "há 3 dias" e o de retorno à fila (promessa para hoje não é "vencida") |
 | `src/lib/recuperacao.test.ts` | 10 | Janela de 30 dias e soma da receita recuperada |
 | `src/lib/credenciais.test.ts` | 9 | Normalização de e-mail e derivação do segredo de sessão a partir das duas partes |
 | `src/lib/rate-limit.test.ts` | 9 | Contagem dentro da janela, expiração e expurgo de entradas velhas (o "agora" é parâmetro, então o teste acerta o relógio) |
@@ -562,7 +574,9 @@ npx vitest            # watch
 
 **O que a suíte não cobre, de propósito:** componentes React, route handlers e a integração real
 com o Supabase. Essa parte é verificada pelo roteiro manual abaixo — o que significa que uma
-mudança em tela ou rota **precisa** ser testada à mão antes de ser considerada pronta.
+mudança em tela ou rota **precisa** ser testada à mão antes de ser considerada pronta. Mudança de
+interface também se confere **visualmente**, no desktop e numa largura de celular (375px), sem
+rolagem para os lados.
 
 ### 2. Dados de exemplo inclusos
 
@@ -616,8 +630,11 @@ estado uns para os outros.
    confirmaria que o e-mail existe).
 3. Acerte e-mail e senha → entra na lista do dia.
 4. Recarregue a página → continua logado (cookie de 30 dias).
+5. Clique em **"Sair"**, no canto direito da barra → volta ao login, e abrir `/` de novo exige
+   login.
 
-✅ **Passou se:** nenhuma rota do app abre sem login, e o erro não diferencia e-mail de senha.
+✅ **Passou se:** nenhuma rota do app abre sem login, o erro não diferencia e-mail de senha, e
+"Sair" encerra a sessão.
 
 #### Cenário 1 — Fluxo completo
 
@@ -745,6 +762,21 @@ NEXT_PUBLIC_SUPABASE_URL=https://host-que-nao-existe.supabase.co
 - **Upload:** se a queda acontecer no meio da gravação, o relatório fica vermelho, informa quantos
   títulos entraram antes da falha e avisa que reimportar o arquivo é seguro.
 
+#### Sessão expirada e rede fora do ar no meio do uso
+
+A sessão pode vencer com a tela aberta, e a conexão pode cair. Para provocar, use as ferramentas
+de desenvolvedor do navegador: apague o cookie `atlas_auth` (aba Aplicativo › Cookies) ou ative o
+modo offline (aba Rede).
+
+**Esperado:**
+
+- **Importar planilha:** "Analisar planilha" mostra a mensagem e **volta ao normal** — antes ficava
+  em "Analisando…" para sempre. Na confirmação, o aviso aparece **na própria prévia**; com sessão
+  expirada ele garante que nada foi gravado e oferece "Entrar de novo".
+- **`/dados`:** "Sessão expirada", com "Entrar de novo" — **sem** números e **sem** os botões de
+  limpeza.
+- **Login com a rede fora:** mensagem de falha de conexão, e o botão volta a "Entrar".
+
 #### Produção sem credencial
 
 ```bash
@@ -779,6 +811,11 @@ correto: zero seria uma afirmação falsa sobre dinheiro.
 | 11 | Limpeza parcial preserva dívida aberta | Cenário 6 |
 | 12 | Cookie forjado não entra | Modos de falha |
 | 13 | Banco fora do ar não vira lista vazia | Modos de falha |
+| 14 | Sessão expirada e rede fora viram mensagem, não botão travado | Modos de falha |
+| 15 | "Sair" encerra a sessão | Cenário 0, passo 5 |
+| 16 | "Pago" pede confirmação com o valor | Cenário 1, passo 7 |
+| 17 | Quem já foi contatado hoje continua marcado depois de recarregar | Cenário 1, passo 6 |
+| 18 | Telas cabem em 375px sem rolagem para os lados | Ferramentas do navegador, modo dispositivo |
 
 ---
 
@@ -792,19 +829,26 @@ src/
 │   ├── upload/page.tsx        # Importar CSV (prévia + confirmação)
 │   ├── dados/page.tsx         # Gerenciar dados
 │   ├── clientes/[id]/page.tsx # Histórico do cliente
-│   ├── globals.css            # Sistema visual: tokens de cor, tipografia e superfície
+│   ├── {login,upload,dados}/layout.tsx  # Só o título da aba (página Client Component não exporta metadata)
+│   ├── layout.tsx             # Casca: barra, "pular para o conteúdo", avisos flutuantes, título por aba
+│   ├── loading.tsx · error.tsx · not-found.tsx  # Carregamento, erro inesperado e 404 próprios
+│   ├── icon.svg               # Ícone da aba (símbolo do Atlas)
+│   ├── globals.css            # Sistema visual: tokens de cor, tipografia, superfície e movimento
 │   └── api/
 │       ├── login/route.ts                # Autenticação (rate limit + comparação constant-time)
+│       ├── logout/route.ts               # Sair: apaga o cookie deste navegador (POST, pública no proxy)
 │       ├── upload-csv/route.ts           # Prévia do CSV (só leitura, não grava nada)
 │       ├── upload-csv/confirmar/route.ts # Confirmação — grava clientes e títulos no banco
 │       └── dados/route.ts                # Estatísticas e limpeza
 ├── components/
 │   ├── FilaCobranca.tsx       # A fila como <table> — uma seção (vencidos / a vencer)
-│   ├── ClienteLinha.tsx       # Linha do cliente: totais, ações e expansão com os títulos
-│   ├── Navbar.tsx             # Barra de navegação
+│   ├── ClienteLinha.tsx       # Linha do cliente: totais, último contato, ações e expansão com os títulos
+│   ├── Avisos.tsx             # Avisos flutuantes de registro (provedor no layout)
+│   ├── Navbar.tsx             # Barra de navegação, com "Sair"; no celular, só ícones
 │   ├── NavbarWrapper.tsx      # Oculta a navbar na tela de login
 │   ├── Marca.tsx              # Símbolo e logotipo do Atlas
-│   └── ui/                    # Primitivas visuais: Botao, BotaoIcone, Badge, Icone, KpiCard
+│   └── ui/                    # Primitivas: Pagina, CabecalhoPagina, Painel, Aviso, KpiCard, Badge,
+│                              #   Botao, BotaoIcone, Icone
 ├── lib/
 │   ├── supabase.ts            # Cliente do banco (service_role, lazy, só no servidor)
 │   ├── supabase-io.ts         # Política de acesso: prazo, falha de dependência, paginação
@@ -816,8 +860,10 @@ src/
 │   ├── sessao.ts              # Valor de cookie assinado (HMAC) com expiração verificada
 │   ├── rate-limit.ts          # Limitador de tentativas por chave, com "agora" injetável
 │   ├── templates.ts           # Mensagens de cobrança (individuais e consolidadas)
-│   ├── format.ts              # Formatação de moeda compartilhada
-│   └── *.test.ts              # Os 8 arquivos de teste, ao lado do código que testam
+│   ├── format.ts              # Formatação de exibição: moeda, plural, datas, hora vinda do banco
+│   ├── contato.ts             # Último contato por cliente e rótulo de retorno à fila
+│   ├── resposta-http.ts       # Como o navegador lê a resposta de uma rota (sessão, rede, corpo)
+│   └── *.test.ts              # Os 11 arquivos de teste, ao lado do código que testam
 ├── actions/
 │   └── index.ts               # Server Actions: registrar envio e atualizar status
 ├── types/
@@ -855,6 +901,11 @@ está nos comentários de cabeçalho desses arquivos e em [ARCHITECTURE.md](ARCH
 | **A fila é uma `<table>` de verdade** | São dados tabulares, e o leitor de tela depende da associação célula-cabeçalho para anunciar "Valor em aberto: R$ 5.600,00" em vez de ler números soltos. | `components/FilaCobranca.tsx` |
 | **Rate limit extraído para uma lib com "agora" injetável** | O comportamento que interessa é temporal (janela expira, contagem reinicia). Dentro da rota, só seria observável subindo servidor e esperando cinco minutos. | `lib/rate-limit.ts` |
 | **Cores e tipografia em tokens semânticos** | `bg-superficie`/`text-risco` em vez de `bg-white`/`text-red-600` permite mudar identidade, adicionar tema escuro ou um segundo domínio sem caçar classe por classe. | `app/globals.css` |
+| **A cor é uma escala de urgência, a mesma em toda tela** | Vermelho = atraso longo, âmbar = atraso leve, neutro = a vencer, verde = pago. O card "A vencer" era âmbar e a linha correspondente da tabela, cinza: a mesma coisa em duas cores. O texto secundário foi medido e passa no contraste AA. | `app/globals.css`, `components/ui/Badge.tsx` |
+| **Resposta de rota lida por uma função só, no navegador** | Sem sessão, o proxy devolve a chamada de API para o login, e o navegador recebe **200 com o HTML do login**. Lido como sucesso, isso mostrava os botões de exclusão sem números; lido como JSON, travava o botão de análise para sempre. | `lib/resposta-http.ts` |
+| **"Pago" pede confirmação com o valor, em vez de oferecer desfazer** | É o único resultado sem volta. Desfazer seria edição de título, fora de escopo, e mexeria em `resolvido_em`, que sustenta a métrica de recuperado. | `components/ClienteLinha.tsx` |
+| **O último contato vem do banco, não do estado da tela** | O título continua na fila depois do envio; a única pista de envio era a cor do ícone, que sumia ao recarregar — e a mesma pessoa podia ser cobrada duas vezes no dia. | `lib/contato.ts`, `app/page.tsx` |
+| **Hora vinda do banco é lida como UTC** | As colunas `TIMESTAMP` não guardam fuso, e ler como hora local adiantava o histórico em três horas. | `lib/format.ts` |
 
 ---
 
@@ -872,7 +923,12 @@ está nos comentários de cabeçalho desses arquivos e em [ARCHITECTURE.md](ARCH
   A *leitura* é paginada internamente e sempre completa; o que não existe é limitar quantas linhas
   aparecem por vez.
 - Não é possível editar um cliente ou título já importado pela interface (nome ou telefone errado).
-  A saída é corrigir na origem e reimportar, ou alterar direto no banco.
+  A saída é corrigir na origem e reimportar, ou alterar direto no banco. Pelo mesmo motivo, um
+  resultado registrado não se desfaz pela tela — por isso "Pago" pede confirmação antes de gravar.
+- Datas e horas seguem o **relógio do servidor**: o "hoje" da fila, os dias de atraso e as horas
+  exibidas. Correto enquanto o servidor rodar no fuso da empresa; num servidor em UTC, entre 21h e
+  meia-noite de Brasília o sistema já estaria no dia seguinte.
+- Não há tema escuro. Os tokens de cor já estão organizados para recebê-lo.
 - Data ambígua entre DD/MM e MM/DD (`03/04/2026`) entra sem aviso como DD/MM. Decidir olhando a
   coluna inteira está planejado ([PLANEJAMENTO.md](PLANEJAMENTO.md) §5.3).
 

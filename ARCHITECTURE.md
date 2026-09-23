@@ -23,7 +23,7 @@ Browser ──▶ Next.js (App Router)
               ├─ Server Components  ──┐
               ├─ Server Actions      ─┼──▶ Supabase (service_role) ──▶ Postgres
               ├─ API Routes         ──┘
-              └─ Middleware (proxy.ts) — gate de autenticação por senha
+              └─ Middleware (proxy.ts) — gate de autenticação (e-mail + senha, cookie assinado)
 ```
 
 Não existe camada de repositório/DAO. A query é montada com o client Supabase direto do lugar que
@@ -244,6 +244,12 @@ dos títulos, então pode sobrar cliente sem título nenhum. Ele não aparece em
 (tudo parte de `titulos`), só infla a contagem de clientes em `/dados`, e a reimportação o
 reaproveita pelo telefone.
 
+**Na tela** (`upload/page.tsx`): as duas chamadas passam por `lib/resposta-http.ts::chamarApi`, e a
+prévia mostra, além das contagens, uma amostra das primeiras linhas de `linhasValidas` como o
+servidor as leu — o lugar de perceber um valor ou uma data interpretados errado antes de gravar.
+Erro da confirmação que não traz relatório aparece na própria prévia, ao lado do botão; o 503 com
+relatório continua indo para a tela de resultado.
+
 O dado que será persistido sai do servidor (passo 1), passa pelo browser e volta ao servidor
 (passo 2) — por isso **não é confiável**. Os dois passos aplicam a mesma
 `lib/csv-import.ts::validarLinhaRecebida`: o passo 1 como portão final antes de prometer ao
@@ -310,7 +316,9 @@ tem aviso próprio, com "Entrar de novo" em vez de "Tentar de novo".
 | Revalidação estrutural de linha recebida | `lib/csv-import.ts::validarLinhaRecebida` | Usada por `confirmar/route.ts` antes de gravar — não existia antes |
 | Regra de duplicata na importação | `lib/csv-import.ts::planejarImportacao` (decisão) **+** `idx_titulos_aberto_unico` no Postgres (garantia) | Uma implementação só, chamada pela prévia e pela confirmação. A garantia real é do banco — a checagem em memória serve para relatar e evitar ida desnecessária |
 | "Valor vencido" nas estatísticas administrativas | `api/dados/route.ts` (via `calcularDiasAtraso`) | Reaproveita a fonte oficial — antes comparava strings ISO com lógica própria |
-| Formatação de moeda | `lib/format.ts::formatarMoeda` | Centralizado — antes reimplementado em 6 arquivos |
+| Formatação de exibição (moeda, datas, hora do banco) | `lib/format.ts` | Centralizado — a moeda era reimplementada em 6 arquivos. `instanteDoBanco` lê `timestamp` sem fuso como UTC (ver §10) |
+| "Pago" pede confirmação antes de gravar | `components/ClienteLinha.tsx::ConfirmacaoDePago` | **Só na interface.** `atualizarStatusTitulo` grava ao ser chamada, sem confirmação própria |
+| Data de promessa é hoje ou depois | `components/ClienteLinha.tsx::FormularioPromessa` | **Só na interface.** A Server Action aceita qualquer data; uma data passada faria o título voltar na hora como "promessa vencida" |
 | Autenticação | `proxy.ts` + `api/login/route.ts` | Rate limiting em memória + comparação constant-time |
 
 A regra de negócio mais importante do sistema (o que é "urgente") tem uma única implementação,
@@ -332,6 +340,11 @@ reaproveitada em todos os pontos que precisam dela — inclusive `ClienteLinha.t
 Quem decide é `lib/prioridade.ts::estaNaFilaHoje`, avaliado **na leitura** — não existe cron,
 worker ou fila. A home busca `.neq('status','pago')` e o domínio filtra. Um título que reentra
 entra mesmo com vencimento distante: o compromisso assumido vence o corte de "ainda não é urgente".
+
+"Chegou" é **hoje ou no passado**, então uma promessa registrada para o próprio dia **não tira o
+título da fila**. O domínio chama esse caso também de `promessa_vencida`; é a tela que o distingue
+("promessa para hoje", em `lib/contato.ts::rotuloReentrada`), porque no próprio dia a promessa não
+foi quebrada.
 
 **Consequência que já quebrou código**: "concluído" deixou de ser `status != 'aberto'`. Toda query
 que significa "ainda devido" usa `status != 'pago'`. O `DELETE ?modo=concluidos` apagava
@@ -369,10 +382,16 @@ deles.
   próprio arquivo, que antes ela não via — um CSV com a linha repetida anunciava "2 prontos" e a
   gravação importava 1.
 - **Detecção de separador de CSV em duas implementações**: uma ingênua no browser
-  (`upload/page.tsx::analisarCSVLocal`, só olha se a primeira linha contém `;`/tab/vírgula, usada
-  só pra um preview instantâneo antes do POST) e outra via PapaParse no servidor (autoritativa).
-  Podem divergir em arquivos com campos entre aspas — impacto baixo porque o preview do browser é
-  só informativo, o servidor decide de verdade.
+  (`upload/page.tsx::analisarCSVLocal`, só olha se a primeira linha contém `;`, tab ou `|` — senão
+  assume vírgula —, usada só pra um preview instantâneo antes do POST) e outra via PapaParse no
+  servidor (autoritativa). Podem divergir em arquivos com campos entre aspas — impacto baixo porque
+  o preview do browser é só informativo, o servidor decide de verdade.
+- **Data local em `YYYY-MM-DD` em dois lugares**: `lib/format.ts::dataLocalISO` (exportada, usada
+  pela exibição) repete `paraDataLocalISO`, que é privada de `lib/prioridade.ts`. Quatro linhas
+  idênticas; exportar a do domínio só para a exibição importar pareceu pior do que a repetição.
+- **A frase "EXCLUIR TUDO" em dois lugares**: `api/dados/route.ts` (que valida) e
+  `dados/page.tsx` (que pede para a pessoa digitar). A rota não pode ser importada pelo navegador.
+  Se divergirem, a exclusão falha com 400 — o erro seguro.
 
 ---
 
@@ -385,9 +404,9 @@ deles.
   acoplamento novo, imposto pelo tipo (`T extends { id: string }`) para não ser esquecido. Quem
   precisar de outra ordem para exibir tem de reordenar em memória (ver `clientes/[id]/page.tsx`).
 - **UI acoplada ao shape das respostas de API por convenção, não por tipo compartilhado** —
-  `upload/page.tsx` declara `PreviewResult`/`ConfirmResult`/`LinhaValida` manualmente, duplicando
-  (sem importar) o formato que as rotas de API realmente retornam. Uma mudança no backend não
-  quebra a compilação do front — só quebra em runtime.
+  `upload/page.tsx` declara `PreviewResult`/`ConfirmResult`/`LinhaValida` e `dados/page.tsx`
+  declara `Stats` manualmente, duplicando (sem importar) o formato que as rotas de API realmente
+  retornam. Uma mudança no backend não quebra a compilação do front — só quebra em runtime.
 - **`revalidatePath('/')` / `revalidatePath('/clientes', 'layout')` hardcoded** em
   `actions/index.ts` — a Server Action conhece explicitamente as rotas da aplicação.
 - **O formato do `select` é declarado à mão** (`TituloDaFila` em `page.tsx`,
@@ -404,8 +423,9 @@ deles.
   Component que busca via `fetch` numa API Route. Não há critério registrado em código para quando
   usar um ou outro.
 - **Padrão de mutação não é único**: parte do sistema usa Server Actions
-  (`actions/index.ts`, chamado pelos cards da lista do dia); parte usa API Routes chamadas via
-  `fetch` no client (`/api/dados` DELETE, `/api/upload-csv*` POST). Os dois padrões coexistem.
+  (`actions/index.ts`, chamado pelas linhas da lista do dia); parte usa API Routes chamadas via
+  `fetch` no client (`/api/dados` DELETE, `/api/upload-csv*` POST) ou por formulário comum
+  (`/api/logout`, que funciona sem JavaScript). Os padrões coexistem.
 - ~~Fonte de verdade da urgência dividida~~ — **resolvido**: `api/upload-csv/route.ts` e
   `api/dados/route.ts` agora chamam `lib/prioridade.ts` em vez de decidir por conta própria.
 - ~~Validação de negócio existe só no passo de prévia~~ — **resolvido**: `confirmar/route.ts`
@@ -459,8 +479,14 @@ deles.
   para o deploy de instância única do Atlas hoje, não para serverless/multi-instância.
 - **`DELETE /api/dados?modo=tudo` agora exige a frase `"EXCLUIR TUDO"` no corpo da requisição**,
   além da senha do app — eleva a barra de "só ter o cookie" pra "precisa conhecer o contrato exato
-  da API", uma defesa em profundidade proporcional ao estágio do produto (não um fluxo de
-  confirmação digitada pelo usuário, que seria mais fricção do que o risco justifica hoje).
+  da API", uma defesa em profundidade proporcional ao estágio do produto.
+  **Decisão revista em 2026-09-23.** O registro original dizia que *não* haveria confirmação
+  digitada pela pessoa, "que seria mais fricção do que o risco justifica hoje", e a tela enviava a
+  frase sozinha no segundo clique. Na trilha de UI/UX a tela passou a pedir que a frase seja
+  digitada. **Não houve evidência nova medida — foi reavaliação:** a tela deixou de ser ferramenta
+  de teste (o texto "opções de limpeza para testes" saiu), "Limpar tudo" é a única ação do produto
+  que apaga tudo sem desfazer, e o custo é digitar duas palavras numa ação rara. A reversão, se
+  preferida, é local: tirar `exigeFrase` de `AcaoPerigo`, em `dados/page.tsx`.
 - Cookie de sessão agora marcado `secure` em produção (`NODE_ENV === 'production'`).
 
 ### Ainda válidas / não endereçadas
