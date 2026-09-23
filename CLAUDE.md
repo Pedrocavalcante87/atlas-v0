@@ -52,8 +52,10 @@ precisa antes de tocar em qualquer coisa.
 12. **Respeite o escopo.** Implemente o que foi pedido. Se achar problema não relacionado,
     registre e explique o impacto em vez de consertar por conta própria dentro da mesma tarefa.
 13. **Git com rastreabilidade e branches.** Nunca comece funcionalidade, correção ou refatoração
-    commitando direto na `main` — crie uma branch dedicada primeiro. Política completa de branches,
-    commits, merge e o que exige autorização explícita em §Workflow Git.
+    commitando direto na `main` — crie uma branch dedicada primeiro. **Commit e push da branch de
+    trabalho estão autorizados a cada evolução do sistema** (desde 2026-09-23); integrar à `main`
+    continua exigindo autorização explícita. Política completa de branches, commits, push, merge e
+    o que exige autorização em §Workflow Git.
 14. **Documentação no lugar certo.** Fato arquitetural novo vai para `ARCHITECTURE.md`; este
     arquivo (`CLAUDE.md`) é para regra de comportamento, contexto essencial e comandos — não para
     documentação extensa de sistema.
@@ -115,8 +117,9 @@ a caber nele. Se o código é que está errado, isso é um bug, e vira tarefa pr
 ## Workflow Git
 
 Repositório real é `atlas/` (a pasta um nível acima não é um repo git). Remote `origin` →
-`github.com/Pedrocavalcante87/atlas-v0`. Só existe a branch `main` (local e remota) — não há
-`develop`. Não há CI/GitHub Actions nem branch protection configurados neste repositório (nada em
+`github.com/Pedrocavalcante87/atlas-v0`. A branch principal é `main` — não há `develop`; as demais
+são branches de trabalho (liste com `git branch -a`, não confie em lista escrita aqui). Não há
+CI/GitHub Actions nem branch protection configurados neste repositório (nada em
 `.github/workflows/`; proteção de branch no GitHub não pôde ser verificada por falta de acesso à
 API/gh CLI neste ambiente — não assuma que existe nem que não existe, confirme se for relevante
 para uma decisão). A política abaixo é de **processo**, não depende de proteção técnica do GitHub
@@ -150,14 +153,27 @@ novo.
 - **Antes de cada commit**, revise `git status`/`git diff` (staged e unstaged) e confirme que só
   entram mudanças relacionadas à tarefa. Não use `git add -A`/`git add .` sem olhar o que está
   sendo incluído.
-- **Nunca faça commit sem pedido explícito do usuário** (regra já existente, mantida).
+- **Commit e push da branch de trabalho estão autorizados, sem pedir, a cada evolução do
+  sistema.** Autorização permanente dada pelo usuário em 2026-09-23 ("você tem autorização de
+  fazer commit e push a cada evolução do sistema"). Até então cada commit e cada push exigiam
+  pedido explícito. Na prática:
+  - Commite ao fechar cada mudança lógica, sempre na branch dedicada — nunca direto na `main`.
+  - Faça push da branch (`git push -u origin <branch>`) ao concluir a evolução, **depois** de as
+    verificações passarem: `npm run test`, `npm run lint`, `npx tsc --noEmit`, `npm run build` e,
+    se a mudança mexe em interface, a validação visual (ver §Comandos). Branch com verificação
+    falhando não sobe.
+  - Depois do push o histórico da branch é público: correção vira commit novo, nunca reescrita.
+  - Ao terminar, informe a branch, os commits e o link de pull request que o push imprime
+    (`pull/new/<branch>`) — este ambiente não tem `gh` para abrir o PR.
+  - A autorização **não cobre** integrar à `main` nem as operações da lista "Exige autorização
+    explícita" abaixo.
 - **Antes de sugerir ou abrir um merge para `main`**, rode as verificações que existem hoje no
   projeto — `npm run lint`, `npx tsc --noEmit` — e valide manualmente via `npm run dev` quando a
   mudança afeta UI ou dado (a suíte cobre só o domínio, ver §Comandos). Reporte o resultado dessas
   checagens ao usuário antes do merge, não depois.
-- **Nunca faça merge para `main`, nem push de nenhuma branch para `origin` (incluindo branches de
-  feature/fix/refactor/hotfix), sem autorização explícita do usuário para aquela ação específica** —
-  merge local (`git merge`) ou via Pull Request no GitHub, o que o usuário preferir no momento.
+- **Nunca faça merge para `main`, nem push direto para a `main`, sem autorização explícita do
+  usuário para aquela ação específica** — merge local (`git merge`) ou via Pull Request no GitHub,
+  o que o usuário preferir no momento. Push de branch de trabalho está autorizado (item acima).
 - **Nunca use `git reset --hard`, `git push --force`/`--force-with-lease`, rebase que reescreve
   commits já publicados, `git branch -D`, `git push origin --delete`, ou qualquer operação que
   apague/reescreva histórico** sem autorização explícita do usuário para aquela operação específica.
@@ -178,7 +194,8 @@ novo.
 ### Exige autorização explícita do usuário (parar e perguntar)
 
 - Merge para `main`, por qualquer método (fast-forward, merge commit, squash) — local ou via PR.
-- Push para `main`, ou push de qualquer branch para `origin`.
+- Push para `main`. (Push de branch de trabalho deixou de precisar de pedido em 2026-09-23 — ver
+  §Regras obrigatórias.)
 - `git reset --hard`, `git push --force`/`--force-with-lease`, rebase de commits já publicados,
   `git branch -D`, `git push origin --delete`, ou remoção de branch/tag.
 - Descartar alterações não commitadas fora do escopo estrito da tarefa (`git checkout -- .`,
