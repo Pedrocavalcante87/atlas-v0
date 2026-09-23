@@ -7,6 +7,10 @@ import FilaCobranca from '@/components/FilaCobranca';
 import KpiCard from '@/components/ui/KpiCard';
 import { formatarMoeda } from '@/lib/format';
 import Link from 'next/link';
+import type { Metadata } from 'next';
+
+// Título completo: o `template` do layout raiz não se aplica ao segmento dele mesmo.
+export const metadata: Metadata = { title: { absolute: 'Lista do dia · Atlas' } };
 
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';

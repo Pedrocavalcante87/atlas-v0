@@ -56,5 +56,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // O ícone da aba (app/icon.svg) fica fora do gate como o favicon ficava:
+  // é arte estática, e atrás do login a própria tela de login ficava sem ele.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.svg).*)'],
 };

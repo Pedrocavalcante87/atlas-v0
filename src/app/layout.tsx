@@ -24,8 +24,12 @@ const plexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
+// Título por tela ("Importar planilha · Atlas"). Com o WhatsApp Web aberto
+// ao lado, todas as abas do Atlas se chamavam "Atlas — Painel de Cobrança".
+// No Next 16 o `template` só vale para segmentos FILHOS: a home, que é deste
+// mesmo segmento, declara o título completo (ver app/page.tsx).
 export const metadata: Metadata = {
-  title: "Atlas — Painel de Cobrança",
+  title: { default: "Atlas", template: "%s · Atlas" },
   description: "Lista priorizada de cobrança para pequenos negócios",
 };
 
@@ -40,8 +44,19 @@ export default function RootLayout({
       className={`${inter.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-superficie-sutil text-texto">
+        {/* Primeiro item do Tab: pula a barra superior. Invisível até ganhar foco. */}
+        <a
+          href="#conteudo"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-60
+                     focus:px-3 focus:py-2 focus:rounded-md focus:bg-superficie focus:text-texto
+                     focus:text-corpo focus:font-medium focus:shadow-flutuante"
+        >
+          Pular para o conteúdo
+        </a>
         <NavbarWrapper />
-        <div className="flex-1">{children}</div>
+        <div id="conteudo" tabIndex={-1} className="flex-1 outline-none">
+          {children}
+        </div>
       </body>
     </html>
   );
