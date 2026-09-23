@@ -88,7 +88,7 @@ export default async function HomePage() {
           <KpiCard
             rotulo="A vencer"
             valor={preventivos.length}
-            tom="atencao"
+            tom="neutro"
             nota="vencem em até 3 dias"
           />
           <KpiCard
